@@ -1,0 +1,11 @@
+[package]
+name = "rawjs_vm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rawjs_common = { path = "../rawjs_common" }
+rawjs_bytecode = { path = "../rawjs_bytecode" }
+rawjs_runtime = { path = "../rawjs_runtime" }
+rawjs_parser = { path = "../rawjs_parser" }

@@ -1,0 +1,18 @@
+[package]
+name = "rawjs_cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rawjs"
+path = "src/main.rs"
+
+[dependencies]
+rawjs_common = { path = "../rawjs_common" }
+rawjs_lexer = { path = "../rawjs_lexer" }
+rawjs_ast = { path = "../rawjs_ast" }
+rawjs_parser = { path = "../rawjs_parser" }
+rawjs_bytecode = { path = "../rawjs_bytecode" }
+rawjs_runtime = { path = "../rawjs_runtime" }
+rawjs_vm = { path = "../rawjs_vm" }

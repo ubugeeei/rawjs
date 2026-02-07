@@ -1,0 +1,8 @@
+[package]
+name = "rawjs_lexer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rawjs_common = { path = "../rawjs_common" }

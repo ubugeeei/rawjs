@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rawjs_common",
+    "crates/rawjs_lexer",
+    "crates/rawjs_ast",
+    "crates/rawjs_parser",
+    "crates/rawjs_bytecode",
+    "crates/rawjs_runtime",
+    "crates/rawjs_vm",
+    "crates/rawjs_cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"

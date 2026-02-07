@@ -1,0 +1,10 @@
+[package]
+name = "rawjs_parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rawjs_common = { path = "../rawjs_common" }
+rawjs_lexer = { path = "../rawjs_lexer" }
+rawjs_ast = { path = "../rawjs_ast" }
