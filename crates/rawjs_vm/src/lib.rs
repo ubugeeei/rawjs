@@ -120,6 +120,8 @@ pub struct Vm {
     module_cache: HashMap<String, GcPtr<JsObject>>,
     /// Directory of the currently executing file (for relative path resolution).
     pub current_file_dir: Option<String>,
+    /// Canonical path of the currently executing module.
+    pub current_file_path: Option<String>,
     /// The exports object for the currently executing module (if any).
     pub(crate) module_exports: Option<GcPtr<JsObject>>,
 }
@@ -153,6 +155,7 @@ impl Vm {
             generator_prototype: None,
             module_cache: HashMap::new(),
             current_file_dir: None,
+            current_file_path: None,
             module_exports: None,
         };
         vm.init_globals();
@@ -324,6 +327,9 @@ impl Vm {
     /// the final value left on the stack (or `undefined`).
     pub fn execute(&mut self, chunk: Chunk) -> Result<JsValue> {
         let chunk_index = self.add_chunk(chunk);
+        if self.chunks[chunk_index].is_async {
+            return interpreter::execute_async_top_level(self, chunk_index);
+        }
 
         let local_count = self.chunks[chunk_index].local_count as usize;
 
@@ -357,6 +363,26 @@ impl Vm {
     /// Set (or create) a global variable.
     pub fn set_global(&mut self, name: String, value: JsValue) {
         self.globals.insert(name, value);
+    }
+
+    pub(crate) fn create_promise_object(&mut self) -> GcPtr<JsObject> {
+        let promise_ptr = self.heap.alloc(JsObject::promise());
+        if let Some(ref proto) = self.promise_prototype {
+            promise_ptr.borrow_mut().prototype = Some(proto.clone());
+        }
+        promise_ptr
+    }
+
+    pub(crate) fn create_import_meta_object(&mut self) -> Result<GcPtr<JsObject>> {
+        let current_path = self.current_file_path.clone().ok_or_else(|| {
+            RawJsError::type_error("import.meta is only available while executing a module")
+        })?;
+
+        let meta_ptr = self.heap.alloc(JsObject::ordinary());
+        meta_ptr
+            .borrow_mut()
+            .set_property("url".to_string(), JsValue::string(current_path));
+        Ok(meta_ptr)
     }
 
     // -----------------------------------------------------------------
@@ -474,6 +500,7 @@ impl Vm {
 
         // Save parent context
         let prev_file_dir = self.current_file_dir.take();
+        let prev_file_path = self.current_file_path.take();
         let prev_exports = self.module_exports.take();
 
         // Set module context
@@ -481,31 +508,37 @@ impl Vm {
             .parent()
             .map(|p| p.to_string_lossy().to_string());
         self.current_file_dir = module_dir;
+        self.current_file_path = Some(resolved.clone());
         self.module_exports = Some(exports.clone());
 
         // --- Execute ---
         let chunk_index = self.add_chunk(chunk);
-        let local_count = self.chunks[chunk_index].local_count as usize;
+        let execution_result = if self.chunks[chunk_index].is_async {
+            interpreter::execute_async_top_level(self, chunk_index).map(|_| ())
+        } else {
+            let local_count = self.chunks[chunk_index].local_count as usize;
+            let frame = CallFrame {
+                chunk_index,
+                ip: 0,
+                base: self.value_stack.len(),
+                locals: vec![JsValue::Undefined; local_count],
+                upvalues: Vec::new(),
+                this_value: JsValue::Undefined,
+            };
+            self.call_stack.push(frame);
 
-        let frame = CallFrame {
-            chunk_index,
-            ip: 0,
-            base: self.value_stack.len(),
-            locals: vec![JsValue::Undefined; local_count],
-            upvalues: Vec::new(),
-            this_value: JsValue::Undefined,
+            // Run only the module frame.  We record the call-stack depth so
+            // the interpreter stops when the module's frame returns instead
+            // of continuing into the caller's frame.
+            interpreter::run_module_frame(self)
         };
-        self.call_stack.push(frame);
-
-        // Run only the module frame.  We record the call-stack depth so
-        // the interpreter stops when the module's frame returns instead
-        // of continuing into the caller's frame.
-        interpreter::run_module_frame(self)?;
 
         // --- Restore parent context ---
         let final_exports = self.module_exports.take().unwrap_or(exports);
         self.current_file_dir = prev_file_dir;
+        self.current_file_path = prev_file_path;
         self.module_exports = prev_exports;
+        execution_result?;
 
         // --- Cache result ---
         self.module_cache.insert(resolved, final_exports.clone());
@@ -559,6 +592,8 @@ impl Default for Vm {
 mod tests {
     use super::*;
     use rawjs_bytecode::{Chunk, Constant, Instruction};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     /// Helper: build a chunk that pushes a number constant and returns it.
     fn make_return_number(n: f64) -> Chunk {
@@ -567,6 +602,14 @@ mod tests {
         chunk.emit(Instruction::LoadConst(idx));
         chunk.emit(Instruction::Return);
         chunk
+    }
+
+    fn execute_source(source: &str) -> (Vm, JsValue) {
+        let program = rawjs_parser::parse(source).unwrap();
+        let chunk = rawjs_bytecode::compile(&program).unwrap();
+        let mut vm = Vm::new();
+        let result = vm.execute(chunk).unwrap();
+        (vm, result)
     }
 
     #[test]
@@ -806,6 +849,226 @@ mod tests {
 
         let result = vm.execute(chunk).unwrap();
         assert_eq!(result, JsValue::Number(42.0));
+    }
+
+    #[test]
+    fn test_execute_top_level_await() {
+        let mut vm = Vm::new();
+        let mut chunk = Chunk::new("<test>");
+        chunk.is_async = true;
+
+        let promise_name = chunk
+            .add_constant(Constant::String("Promise".to_string()))
+            .unwrap();
+        let resolve_name = chunk
+            .add_constant(Constant::String("resolve".to_string()))
+            .unwrap();
+        let value = chunk.add_constant(Constant::Number(42.0)).unwrap();
+
+        chunk.emit(Instruction::LoadGlobal(promise_name));
+        chunk.emit(Instruction::Dup);
+        chunk.emit(Instruction::GetProperty(resolve_name));
+        chunk.emit(Instruction::LoadConst(value));
+        chunk.emit(Instruction::CallMethod(1));
+        chunk.emit(Instruction::Await);
+        chunk.emit(Instruction::Return);
+
+        let result = vm.execute(chunk).unwrap();
+        assert_eq!(result, JsValue::Number(42.0));
+    }
+
+    #[test]
+    fn test_execute_module_with_top_level_await() {
+        let mut vm = Vm::new();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let module_dir = std::env::temp_dir().join(format!("rawjs-top-level-await-{}", unique));
+        let module_path = module_dir.join("dep.js");
+
+        let _ = fs::remove_dir_all(&module_dir);
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(&module_path, "export default await Promise.resolve(42);\n").unwrap();
+
+        vm.current_file_dir = Some(module_dir.to_string_lossy().to_string());
+
+        let exports = vm.execute_module("./dep.js").unwrap();
+        assert_eq!(
+            exports.borrow().get_property("default"),
+            JsValue::Number(42.0)
+        );
+
+        let _ = fs::remove_dir_all(&module_dir);
+    }
+
+    #[test]
+    fn test_execute_import_meta_url() {
+        let mut vm = Vm::new();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let module_dir = std::env::temp_dir().join(format!("rawjs-import-meta-{}", unique));
+        let module_path = module_dir.join("dep.js");
+
+        let _ = fs::remove_dir_all(&module_dir);
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(&module_path, "export default import.meta.url;\n").unwrap();
+
+        vm.current_file_dir = Some(module_dir.to_string_lossy().to_string());
+
+        let exports = vm.execute_module("./dep.js").unwrap();
+        assert_eq!(
+            exports.borrow().get_property("default"),
+            JsValue::string(module_path.canonicalize().unwrap().to_string_lossy())
+        );
+
+        let _ = fs::remove_dir_all(&module_dir);
+    }
+
+    #[test]
+    fn test_execute_dynamic_import() {
+        let mut vm = Vm::new();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let module_dir = std::env::temp_dir().join(format!("rawjs-dynamic-import-{}", unique));
+        let module_path = module_dir.join("dep.js");
+
+        let _ = fs::remove_dir_all(&module_dir);
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(&module_path, "export default 42;\n").unwrap();
+
+        vm.current_file_dir = Some(module_dir.to_string_lossy().to_string());
+
+        let program =
+            rawjs_parser::parse("name = 'dep'; out = (await import('./' + name + '.js')).default;")
+                .unwrap();
+        let chunk = rawjs_bytecode::compile(&program).unwrap();
+        vm.execute(chunk).unwrap();
+
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(42.0)));
+
+        let _ = fs::remove_dir_all(&module_dir);
+    }
+
+    #[test]
+    fn test_execute_dynamic_import_rejects_missing_module() {
+        let mut vm = Vm::new();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let module_dir =
+            std::env::temp_dir().join(format!("rawjs-dynamic-import-missing-{}", unique));
+
+        let _ = fs::remove_dir_all(&module_dir);
+        fs::create_dir_all(&module_dir).unwrap();
+
+        vm.current_file_dir = Some(module_dir.to_string_lossy().to_string());
+
+        let program = rawjs_parser::parse(
+            "out = ''; try { await import('./missing.js'); } catch (e) { out = e; }",
+        )
+        .unwrap();
+        let chunk = rawjs_bytecode::compile(&program).unwrap();
+        vm.execute(chunk).unwrap();
+
+        let out = vm.get_global("out").cloned().unwrap_or(JsValue::Undefined);
+        let out = out.to_string_value();
+        assert!(out.contains("Cannot find module './missing.js'"));
+
+        let _ = fs::remove_dir_all(&module_dir);
+    }
+
+    #[test]
+    fn test_execute_optional_member_access() {
+        let (vm, _) = execute_source("let obj = { value: 42 }; out = obj?.value;");
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(42.0)));
+    }
+
+    #[test]
+    fn test_execute_optional_member_access_on_null() {
+        let (vm, _) = execute_source("let obj = null; out = obj?.value;");
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Undefined));
+    }
+
+    #[test]
+    fn test_execute_optional_method_call_preserves_this() {
+        let (vm, _) = execute_source(
+            "let obj = { value: 42, getValue: function() { return this.value; } }; out = obj.getValue?.();",
+        );
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(42.0)));
+    }
+
+    #[test]
+    fn test_execute_optional_method_call_on_null_receiver() {
+        let (vm, _) = execute_source("let obj = null; out = obj?.getValue();");
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Undefined));
+    }
+
+    #[test]
+    fn test_execute_optional_delete_on_null_receiver() {
+        let (vm, _) = execute_source("let obj = null; out = delete obj?.value;");
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Boolean(true)));
+    }
+
+    #[test]
+    fn test_execute_using_calls_bytecode_dispose() {
+        let (vm, _) = execute_source(
+            "disposed = 0; { using r = { [Symbol.dispose]: function() { disposed = 1; } }; } out = disposed;",
+        );
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(1.0)));
+    }
+
+    #[test]
+    fn test_execute_await_using_awaits_async_dispose() {
+        let (vm, _) = execute_source(
+            "disposed = 0; { await using r = { [Symbol.asyncDispose]: async function() { await Promise.resolve(0); disposed = 1; } }; } out = disposed;",
+        );
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(1.0)));
+    }
+
+    #[test]
+    fn test_execute_await_using_sync_fallback_is_not_awaited() {
+        let (vm, _) = execute_source(
+            "disposed = 0; { await using r = { [Symbol.dispose]: async function() { await Promise.resolve(0); disposed = 1; } }; } out = disposed;",
+        );
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(0.0)));
+    }
+
+    #[test]
+    fn test_execute_logical_or_assignment() {
+        let (vm, _) = execute_source("let value = 0; out = (value ||= 42); out2 = value;");
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(42.0)));
+        assert_eq!(vm.get_global("out2"), Some(&JsValue::Number(42.0)));
+    }
+
+    #[test]
+    fn test_execute_logical_and_assignment_short_circuits() {
+        let (vm, _) = execute_source("let value = 0; out = (value &&= 42); out2 = value;");
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(0.0)));
+        assert_eq!(vm.get_global("out2"), Some(&JsValue::Number(0.0)));
+    }
+
+    #[test]
+    fn test_execute_logical_nullish_assignment() {
+        let (vm, _) = execute_source("let value = null; out = (value ??= 42); out2 = value;");
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(42.0)));
+        assert_eq!(vm.get_global("out2"), Some(&JsValue::Number(42.0)));
+    }
+
+    #[test]
+    fn test_execute_logical_assignment_member_evaluates_left_once() {
+        let (vm, _) = execute_source(
+            "objCalls = 0; keyCalls = 0; holder = { value: 0 }; function getObj() { objCalls += 1; return holder; } function getKey() { keyCalls += 1; return 'value'; } out = (getObj()[getKey()] ||= 1); out2 = objCalls; out3 = keyCalls; out4 = holder.value;",
+        );
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(1.0)));
+        assert_eq!(vm.get_global("out2"), Some(&JsValue::Number(1.0)));
+        assert_eq!(vm.get_global("out3"), Some(&JsValue::Number(1.0)));
+        assert_eq!(vm.get_global("out4"), Some(&JsValue::Number(1.0)));
     }
 
     #[test]

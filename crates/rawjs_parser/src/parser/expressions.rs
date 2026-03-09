@@ -806,6 +806,7 @@ impl Parser {
                     location: loc,
                 }))
             }
+            TokenKind::Import => self.parse_import_primary_expression(),
             TokenKind::LParen => {
                 self.advance();
                 let expr = self.parse_expression()?;
@@ -883,6 +884,58 @@ impl Parser {
             }
             _ => Err(RawJsError::syntax_error(
                 format!("Unexpected token: {:?}", self.peek()),
+                Some(loc),
+            )),
+        }
+    }
+
+    fn parse_import_primary_expression(&mut self) -> Result<Expression> {
+        if self.pos + 1 < self.tokens.len() && self.tokens[self.pos + 1].kind == TokenKind::Dot {
+            return self.parse_import_meta_expression();
+        }
+
+        self.parse_import_expression()
+    }
+
+    fn parse_import_expression(&mut self) -> Result<Expression> {
+        let loc = self.location();
+        self.expect(&TokenKind::Import)?;
+        self.expect(&TokenKind::LParen)?;
+        let arguments = self.parse_arguments()?;
+        self.expect(&TokenKind::RParen)?;
+
+        if arguments.len() != 1 {
+            return Err(RawJsError::syntax_error(
+                "import() expects exactly one argument",
+                Some(loc),
+            ));
+        }
+
+        let source = match arguments.into_iter().next().unwrap() {
+            Expression::Spread(_) => {
+                return Err(RawJsError::syntax_error(
+                    "import() does not allow spread arguments",
+                    Some(loc),
+                ))
+            }
+            source => source,
+        };
+
+        Ok(Expression::Import(ImportExpression {
+            source: Box::new(source),
+            location: loc,
+        }))
+    }
+
+    fn parse_import_meta_expression(&mut self) -> Result<Expression> {
+        let loc = self.location();
+        self.expect(&TokenKind::Import)?;
+        self.expect(&TokenKind::Dot)?;
+
+        match self.expect_identifier()? {
+            name if name == "meta" => Ok(Expression::ImportMeta(loc)),
+            _ => Err(RawJsError::syntax_error(
+                "Expected 'meta' after 'import.'",
                 Some(loc),
             )),
         }

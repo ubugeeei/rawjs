@@ -328,6 +328,14 @@ impl JitCompiler {
                 self.emit_u32(0x35000000); // CBNZ w0, #0 (placeholder)
                 self.jump_patches.push((patch_offset, target));
             }
+            Instruction::JumpIfNullish(offset) => {
+                self.emit_mov_reg(reg::X0, reg::X19);
+                self.emit_load_and_call(stubs::stub_pop_and_test_nullish as *const () as usize);
+                let target = ((bc_index as i64) + 1 + (offset as i64)) as usize;
+                let patch_offset = self.code.len();
+                self.emit_u32(0x35000000); // CBNZ w0, #0 (placeholder)
+                self.jump_patches.push((patch_offset, target));
+            }
 
             // --- Iterator ---
             Instruction::GetIterator => {
@@ -388,6 +396,12 @@ impl JitCompiler {
             Instruction::ImportModule(idx) => {
                 self.emit_stub_call_1(stubs::stub_import_module as *const () as usize, idx as u32);
             }
+            Instruction::ImportModuleDynamic => {
+                self.emit_stub_call_0(stubs::stub_import_module_dynamic as *const () as usize);
+            }
+            Instruction::ImportMeta => {
+                self.emit_stub_call_0(stubs::stub_import_meta as *const () as usize);
+            }
             Instruction::ImportBinding(idx) => {
                 self.emit_stub_call_1(stubs::stub_import_binding as *const () as usize, idx as u32);
             }
@@ -428,6 +442,12 @@ impl JitCompiler {
             Instruction::DisposeResource(slot) => {
                 self.emit_stub_call_1(
                     stubs::stub_dispose_resource as *const () as usize,
+                    slot as u32,
+                );
+            }
+            Instruction::AsyncDisposeResource(slot) => {
+                self.emit_stub_call_1(
+                    stubs::stub_async_dispose_resource as *const () as usize,
                     slot as u32,
                 );
             }

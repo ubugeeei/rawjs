@@ -71,6 +71,88 @@ fn compile_empty_program() {
 }
 
 #[test]
+fn compile_top_level_await_marks_program_async() {
+    let prog = program(vec![expr_stmt(Expression::Await(AwaitExpression {
+        argument: Box::new(ident_expr("value")),
+        location: loc(),
+    }))]);
+    let chunk = Compiler::compile_program(&prog).unwrap();
+
+    assert!(chunk.is_async);
+    assert!(matches!(chunk.instructions[0], Instruction::LoadGlobal(_)));
+    assert_eq!(chunk.instructions[1], Instruction::Await);
+}
+
+#[test]
+fn compile_await_in_sync_function_still_errors() {
+    let prog = program(vec![Statement::FunctionDeclaration(FunctionDeclaration {
+        id: Some("syncFn".to_string()),
+        params: vec![],
+        body: Box::new(BlockStatement {
+            body: vec![expr_stmt(Expression::Await(AwaitExpression {
+                argument: Box::new(ident_expr("value")),
+                location: loc(),
+            }))],
+            location: loc(),
+        }),
+        is_async: false,
+        is_generator: false,
+        location: loc(),
+    })]);
+
+    let result = Compiler::compile_program(&prog);
+    assert!(result.is_err());
+}
+
+#[test]
+fn compile_await_using_emits_async_dispose() {
+    let prog = program(vec![Statement::Block(BlockStatement {
+        body: vec![Statement::VariableDeclaration(VariableDeclaration {
+            kind: VarKind::AwaitUsing,
+            declarations: vec![VariableDeclarator {
+                id: ident_pat("resource"),
+                init: Some(ident_expr("value")),
+                location: loc(),
+            }],
+            location: loc(),
+        })],
+        location: loc(),
+    })]);
+    let chunk = Compiler::compile_program(&prog).unwrap();
+
+    assert!(chunk
+        .instructions
+        .iter()
+        .any(|instruction| matches!(instruction, Instruction::AsyncDisposeResource(_))));
+}
+
+#[test]
+fn compile_await_using_in_sync_function_errors() {
+    let prog = program(vec![Statement::FunctionDeclaration(FunctionDeclaration {
+        id: Some("syncFn".to_string()),
+        params: vec![],
+        body: Box::new(BlockStatement {
+            body: vec![Statement::VariableDeclaration(VariableDeclaration {
+                kind: VarKind::AwaitUsing,
+                declarations: vec![VariableDeclarator {
+                    id: ident_pat("resource"),
+                    init: Some(ident_expr("value")),
+                    location: loc(),
+                }],
+                location: loc(),
+            })],
+            location: loc(),
+        }),
+        is_async: false,
+        is_generator: false,
+        location: loc(),
+    })]);
+
+    let result = Compiler::compile_program(&prog);
+    assert!(result.is_err());
+}
+
+#[test]
 fn compile_number_literal() {
     let prog = program(vec![expr_stmt(num_lit(42.0))]);
     let chunk = Compiler::compile_program(&prog).unwrap();
@@ -615,6 +697,26 @@ fn compile_member_access() {
 }
 
 #[test]
+fn compile_optional_member_access() {
+    let prog = program(vec![expr_stmt(Expression::Member(MemberExpression {
+        object: Box::new(ident_expr("obj")),
+        property: Box::new(ident_expr("prop")),
+        computed: false,
+        optional: true,
+        location: loc(),
+    }))]);
+    let chunk = Compiler::compile_program(&prog).unwrap();
+
+    assert!(matches!(chunk.instructions[0], Instruction::LoadGlobal(_)));
+    assert_eq!(chunk.instructions[1], Instruction::Dup);
+    assert!(matches!(
+        chunk.instructions[2],
+        Instruction::JumpIfNullish(_)
+    ));
+    assert!(matches!(chunk.instructions[3], Instruction::GetProperty(_)));
+}
+
+#[test]
 fn compile_computed_member() {
     // obj[0]
     let prog = program(vec![expr_stmt(Expression::Member(MemberExpression {
@@ -628,6 +730,73 @@ fn compile_computed_member() {
     assert!(matches!(chunk.instructions[0], Instruction::LoadGlobal(_)));
     assert_eq!(chunk.instructions[1], Instruction::LoadConst(1)); // 0.0
     assert_eq!(chunk.instructions[2], Instruction::GetComputed);
+}
+
+#[test]
+fn compile_optional_call() {
+    let prog = program(vec![expr_stmt(Expression::Call(CallExpression {
+        callee: Box::new(ident_expr("fn")),
+        arguments: vec![num_lit(1.0)],
+        optional: true,
+        location: loc(),
+    }))]);
+    let chunk = Compiler::compile_program(&prog).unwrap();
+
+    assert!(matches!(chunk.instructions[0], Instruction::LoadGlobal(_)));
+    assert_eq!(chunk.instructions[1], Instruction::Dup);
+    assert!(matches!(
+        chunk.instructions[2],
+        Instruction::JumpIfNullish(_)
+    ));
+    assert_eq!(chunk.instructions[4], Instruction::Call(1));
+}
+
+#[test]
+fn compile_dynamic_import_expression() {
+    let prog = program(vec![expr_stmt(Expression::Import(ImportExpression {
+        source: Box::new(str_lit("./dep.js")),
+        location: loc(),
+    }))]);
+    let chunk = Compiler::compile_program(&prog).unwrap();
+
+    assert!(matches!(chunk.instructions[0], Instruction::LoadConst(_)));
+    assert_eq!(chunk.instructions[1], Instruction::ImportModuleDynamic);
+}
+
+#[test]
+fn compile_import_meta_expression() {
+    let prog = program(vec![expr_stmt(Expression::Member(MemberExpression {
+        object: Box::new(Expression::ImportMeta(loc())),
+        property: Box::new(ident_expr("url")),
+        computed: false,
+        optional: false,
+        location: loc(),
+    }))]);
+    let chunk = Compiler::compile_program(&prog).unwrap();
+
+    assert_eq!(chunk.instructions[0], Instruction::ImportMeta);
+    assert!(matches!(chunk.instructions[1], Instruction::GetProperty(_)));
+}
+
+#[test]
+fn compile_optional_assignment_errors() {
+    let prog = program(vec![expr_stmt(Expression::Assignment(
+        AssignmentExpression {
+            operator: AssignmentOp::Assign,
+            left: Box::new(Expression::Member(MemberExpression {
+                object: Box::new(ident_expr("obj")),
+                property: Box::new(ident_expr("prop")),
+                computed: false,
+                optional: true,
+                location: loc(),
+            })),
+            right: Box::new(num_lit(1.0)),
+            location: loc(),
+        },
+    ))]);
+
+    let result = Compiler::compile_program(&prog);
+    assert!(result.is_err());
 }
 
 #[test]
@@ -777,6 +946,69 @@ fn compile_compound_assignment() {
         .iter()
         .any(|i| matches!(i, Instruction::Add));
     assert!(has_add, "Compound assignment should emit Add");
+}
+
+#[test]
+fn compile_logical_or_assignment() {
+    let prog = program(vec![
+        Statement::VariableDeclaration(VariableDeclaration {
+            kind: VarKind::Let,
+            declarations: vec![VariableDeclarator {
+                id: ident_pat("x"),
+                init: Some(num_lit(0.0)),
+                location: loc(),
+            }],
+            location: loc(),
+        }),
+        expr_stmt(Expression::Assignment(AssignmentExpression {
+            operator: AssignmentOp::OrAssign,
+            left: Box::new(ident_expr("x")),
+            right: Box::new(num_lit(5.0)),
+            location: loc(),
+        })),
+    ]);
+    let chunk = Compiler::compile_program(&prog).unwrap();
+
+    assert!(chunk
+        .instructions
+        .iter()
+        .any(|instruction| matches!(instruction, Instruction::JumpIfTrue(_))));
+    assert!(chunk
+        .instructions
+        .iter()
+        .any(|instruction| matches!(instruction, Instruction::StoreLocal(0))));
+}
+
+#[test]
+fn compile_logical_nullish_assignment_to_computed_member() {
+    let prog = program(vec![expr_stmt(Expression::Assignment(
+        AssignmentExpression {
+            operator: AssignmentOp::NullishCoalescingAssign,
+            left: Box::new(Expression::Member(MemberExpression {
+                object: Box::new(ident_expr("obj")),
+                property: Box::new(ident_expr("key")),
+                computed: true,
+                optional: false,
+                location: loc(),
+            })),
+            right: Box::new(num_lit(1.0)),
+            location: loc(),
+        },
+    ))]);
+    let chunk = Compiler::compile_program(&prog).unwrap();
+
+    assert!(chunk
+        .instructions
+        .iter()
+        .any(|instruction| matches!(instruction, Instruction::JumpIfNullish(_))));
+    assert!(chunk
+        .instructions
+        .iter()
+        .any(|instruction| matches!(instruction, Instruction::GetComputed)));
+    assert!(chunk
+        .instructions
+        .iter()
+        .any(|instruction| matches!(instruction, Instruction::SetComputed)));
 }
 
 #[test]

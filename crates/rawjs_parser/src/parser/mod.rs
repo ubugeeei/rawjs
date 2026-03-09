@@ -576,6 +576,7 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use crate::parse;
+    use rawjs_ast::{AssignmentOp, Expression, Statement};
 
     #[test]
     fn test_variable_declaration() {
@@ -635,6 +636,62 @@ mod tests {
     fn test_member_expression() {
         let program = parse("console.log(42);").unwrap();
         assert_eq!(program.body.len(), 1);
+    }
+
+    #[test]
+    fn test_optional_chain() {
+        let program = parse("obj?.prop?.();").unwrap();
+        let Statement::Expression(stmt) = &program.body[0] else {
+            panic!("expected expression statement");
+        };
+        let Expression::Call(call) = &stmt.expression else {
+            panic!("expected call expression");
+        };
+        assert!(call.optional);
+
+        let Expression::Member(member) = call.callee.as_ref() else {
+            panic!("expected member expression");
+        };
+        assert!(member.optional);
+    }
+
+    #[test]
+    fn test_logical_assignment() {
+        let program = parse("value ||= other;").unwrap();
+        let Statement::Expression(stmt) = &program.body[0] else {
+            panic!("expected expression statement");
+        };
+        let Expression::Assignment(assign) = &stmt.expression else {
+            panic!("expected assignment expression");
+        };
+        assert_eq!(assign.operator, AssignmentOp::OrAssign);
+    }
+
+    #[test]
+    fn test_dynamic_import_expression() {
+        let program = parse("import('./dep.js');").unwrap();
+        let Statement::Expression(stmt) = &program.body[0] else {
+            panic!("expected expression statement");
+        };
+        let Expression::Import(import_expr) = &stmt.expression else {
+            panic!("expected import expression");
+        };
+        let Expression::StringLiteral(source) = import_expr.source.as_ref() else {
+            panic!("expected string literal source");
+        };
+        assert_eq!(source.value, "./dep.js");
+    }
+
+    #[test]
+    fn test_import_meta_expression() {
+        let program = parse("import.meta.url;").unwrap();
+        let Statement::Expression(stmt) = &program.body[0] else {
+            panic!("expected expression statement");
+        };
+        let Expression::Member(member) = &stmt.expression else {
+            panic!("expected member expression");
+        };
+        assert!(matches!(member.object.as_ref(), Expression::ImportMeta(_)));
     }
 
     #[test]

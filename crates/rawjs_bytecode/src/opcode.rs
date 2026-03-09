@@ -72,6 +72,8 @@ pub enum Instruction {
     JumpIfFalse(i32),
     /// Pop the top; if truthy, jump by offset.
     JumpIfTrue(i32),
+    /// Pop the top; if null or undefined, jump by offset.
+    JumpIfNullish(i32),
 
     // ---- functions ----
     /// Call a function with `arg_count` arguments. The function and arguments must
@@ -169,6 +171,10 @@ pub enum Instruction {
     /// Load a module and push its namespace object onto the stack.
     /// Operand: constant index of the module source string.
     ImportModule(u16),
+    /// Pop a module specifier, load the module asynchronously, and push a Promise.
+    ImportModuleDynamic,
+    /// Push the current module's import.meta object.
+    ImportMeta,
     /// Get a binding from TOS namespace object and push it.
     /// Operand: constant index of the binding name string.
     ImportBinding(u16),
@@ -195,6 +201,10 @@ pub enum Instruction {
     /// Dispose a resource stored in a local slot by calling its [Symbol.dispose]() method.
     /// If the local is null/undefined, this is a no-op.
     DisposeResource(u16),
+    /// Dispose a resource stored in a local slot for `await using`.
+    /// Uses [Symbol.asyncDispose]() when available, otherwise falls back to
+    /// [Symbol.dispose]() without awaiting its return value.
+    AsyncDisposeResource(u16),
 }
 
 impl Instruction {
@@ -240,6 +250,7 @@ impl Instruction {
             Instruction::Jump(_) => "JUMP",
             Instruction::JumpIfFalse(_) => "JUMP_IF_FALSE",
             Instruction::JumpIfTrue(_) => "JUMP_IF_TRUE",
+            Instruction::JumpIfNullish(_) => "JUMP_IF_NULLISH",
             Instruction::Call(_) => "CALL",
             Instruction::CallMethod(_) => "CALL_METHOD",
             Instruction::Return => "RETURN",
@@ -270,6 +281,8 @@ impl Instruction {
             Instruction::PostfixIncrement => "POSTFIX_INC",
             Instruction::PostfixDecrement => "POSTFIX_DEC",
             Instruction::ImportModule(_) => "IMPORT_MODULE",
+            Instruction::ImportModuleDynamic => "IMPORT_MODULE_DYNAMIC",
+            Instruction::ImportMeta => "IMPORT_META",
             Instruction::ImportBinding(_) => "IMPORT_BINDING",
             Instruction::ExportBinding(_) => "EXPORT_BINDING",
             Instruction::ExportDefault => "EXPORT_DEFAULT",
@@ -277,6 +290,7 @@ impl Instruction {
             Instruction::Yield => "YIELD",
             Instruction::Await => "AWAIT",
             Instruction::DisposeResource(_) => "DISPOSE_RESOURCE",
+            Instruction::AsyncDisposeResource(_) => "ASYNC_DISPOSE_RESOURCE",
         }
     }
 }
@@ -300,15 +314,21 @@ impl std::fmt::Display for Instruction {
             Instruction::Jump(off) => write!(f, "JUMP {}", off),
             Instruction::JumpIfFalse(off) => write!(f, "JUMP_IF_FALSE {}", off),
             Instruction::JumpIfTrue(off) => write!(f, "JUMP_IF_TRUE {}", off),
+            Instruction::JumpIfNullish(off) => write!(f, "JUMP_IF_NULLISH {}", off),
             Instruction::EnterTry(catch_off, finally_off) => {
                 write!(f, "ENTER_TRY catch={} finally={}", catch_off, finally_off)
             }
             Instruction::IteratorDone(off) => write!(f, "ITERATOR_DONE {}", off),
             Instruction::ForInNext(off) => write!(f, "FOR_IN_NEXT {}", off),
             Instruction::ImportModule(idx) => write!(f, "IMPORT_MODULE {}", idx),
+            Instruction::ImportModuleDynamic => write!(f, "IMPORT_MODULE_DYNAMIC"),
+            Instruction::ImportMeta => write!(f, "IMPORT_META"),
             Instruction::ImportBinding(idx) => write!(f, "IMPORT_BINDING {}", idx),
             Instruction::ExportBinding(idx) => write!(f, "EXPORT_BINDING {}", idx),
             Instruction::DisposeResource(slot) => write!(f, "DISPOSE_RESOURCE {}", slot),
+            Instruction::AsyncDisposeResource(slot) => {
+                write!(f, "ASYNC_DISPOSE_RESOURCE {}", slot)
+            }
             other => write!(f, "{}", other.name()),
         }
     }
@@ -324,6 +344,10 @@ mod tests {
         assert_eq!(format!("{}", Instruction::Add), "ADD");
         assert_eq!(format!("{}", Instruction::Jump(-5)), "JUMP -5");
         assert_eq!(
+            format!("{}", Instruction::JumpIfNullish(3)),
+            "JUMP_IF_NULLISH 3"
+        );
+        assert_eq!(
             format!("{}", Instruction::EnterTry(3, 7)),
             "ENTER_TRY catch=3 finally=7"
         );
@@ -334,6 +358,7 @@ mod tests {
         assert_eq!(Instruction::Pop.name(), "POP");
         assert_eq!(Instruction::StoreLocal(0).name(), "STORE_LOCAL");
         assert_eq!(Instruction::CreateClosure(1).name(), "CREATE_CLOSURE");
+        assert_eq!(Instruction::JumpIfNullish(0).name(), "JUMP_IF_NULLISH");
     }
 
     #[test]

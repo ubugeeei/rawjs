@@ -252,12 +252,14 @@ pub enum Expression {
     Assignment(AssignmentExpression),
     Conditional(ConditionalExpression),
     Call(CallExpression),
+    Import(ImportExpression),
     New(NewExpression),
     Member(MemberExpression),
     Sequence(SequenceExpression),
     Spread(SpreadExpression),
     This(SourceLocation),
     Super(SourceLocation),
+    ImportMeta(SourceLocation),
     Yield(YieldExpression),
     Await(AwaitExpression),
 }
@@ -466,6 +468,12 @@ pub struct CallExpression {
     pub callee: Box<Expression>,
     pub arguments: Vec<Expression>,
     pub optional: bool,
+    pub location: SourceLocation,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportExpression {
+    pub source: Box<Expression>,
     pub location: SourceLocation,
 }
 

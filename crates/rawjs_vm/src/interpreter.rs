@@ -9,7 +9,8 @@
 use rawjs_bytecode::{Chunk, Constant, Instruction};
 use rawjs_common::{RawJsError, Result};
 use rawjs_runtime::{
-    GeneratorState, GeneratorStatus, Heap, JsObject, JsValue, ObjectInternal, Property, Upvalue,
+    GcPtr, GeneratorState, GeneratorStatus, Heap, JsObject, JsValue, ObjectInternal, PromiseStatus,
+    Property, Upvalue,
 };
 
 use crate::{CallFrame, TryContext, Vm, JIT_THRESHOLD};
@@ -621,6 +622,13 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
                 frame.ip = ((frame.ip as i64) + (offset as i64)) as usize;
             }
         }
+        Instruction::JumpIfNullish(offset) => {
+            let val = vm.pop()?;
+            if val.is_nullish() {
+                let frame = vm.call_stack.last_mut().unwrap();
+                frame.ip = ((frame.ip as i64) + (offset as i64)) as usize;
+            }
+        }
 
         // =================================================================
         // Function calls
@@ -1002,6 +1010,34 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
             let ns = vm.execute_module(&source)?;
             vm.push(JsValue::Object(ns));
         }
+        Instruction::ImportModuleDynamic => {
+            let specifier = vm.pop()?;
+            let promise_ptr = vm.create_promise_object();
+            let source = specifier.to_string_value();
+
+            match vm.execute_module(&source) {
+                Ok(ns) => {
+                    rawjs_runtime::builtins::resolve_promise_with_heap(
+                        &promise_ptr,
+                        JsValue::Object(ns),
+                        &mut vm.heap,
+                    );
+                }
+                Err(err) => {
+                    rawjs_runtime::builtins::reject_promise_with_heap(
+                        &promise_ptr,
+                        JsValue::string(err.to_string()),
+                        &mut vm.heap,
+                    );
+                }
+            }
+
+            vm.push(JsValue::Object(promise_ptr));
+        }
+        Instruction::ImportMeta => {
+            let meta_ptr = vm.create_import_meta_object()?;
+            vm.push(JsValue::Object(meta_ptr));
+        }
         Instruction::ImportBinding(name_idx) => {
             let name = {
                 let frame = vm.call_stack.last().unwrap();
@@ -1050,6 +1086,11 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
         }
         Instruction::DisposeResource(slot) => {
             exec_dispose_resource(vm, slot)?;
+        }
+        Instruction::AsyncDisposeResource(_) => {
+            return Err(RawJsError::internal_error(
+                "AsyncDisposeResource instruction reached outside async frame",
+            ));
         }
     }
 
@@ -1991,41 +2032,28 @@ fn make_iterator_result(vm: &mut Vm, value: JsValue, done: bool) -> JsValue {
     JsValue::Object(vm.heap.alloc(obj))
 }
 
+enum DisposeResult {
+    Complete,
+    Await(JsValue),
+}
+
 // ---------------------------------------------------------------------------
 // Async function stubs (Phase 2)
 // ---------------------------------------------------------------------------
 
-/// Create and execute an async function call.
-///
-/// Async functions return a Promise. The function body runs synchronously
-/// until the first `Await` or `Return`.
-fn exec_async_call(
+fn create_async_result_promise(vm: &mut Vm) -> GcPtr<JsObject> {
+    vm.create_promise_object()
+}
+
+fn start_async_chunk(
     vm: &mut Vm,
     chunk_index: usize,
-    args: &[JsValue],
+    locals: Vec<JsValue>,
     upvalues: Vec<Upvalue>,
     this_value: JsValue,
-) -> Result<()> {
-    // Create the result promise that the caller will receive.
-    let promise_ptr = vm.heap.alloc(JsObject::promise());
-    if let Some(ref proto) = vm.promise_prototype {
-        promise_ptr.borrow_mut().prototype = Some(proto.clone());
-    }
+) -> GcPtr<JsObject> {
+    let promise_ptr = create_async_result_promise(vm);
 
-    // Set up locals with arguments.
-    let param_count = vm.chunks[chunk_index].param_count as usize;
-    let local_count = vm.chunks[chunk_index].local_count as usize;
-    let slot_count = local_count.max(param_count);
-    let mut locals = vec![JsValue::Undefined; slot_count];
-    for (i, arg) in args.iter().enumerate() {
-        if i < slot_count {
-            locals[i] = arg.clone();
-        }
-    }
-
-    // Create an internal generator state for the async function.
-    // We store the result_promise so that exec_await and Return can
-    // resolve/reject it.
     let state = GeneratorState {
         status: GeneratorStatus::SuspendedStart,
         chunk_index,
@@ -2042,20 +2070,69 @@ fn exec_async_call(
     gen_obj.internal = ObjectInternal::Generator(state);
     let gen_ptr = vm.heap.alloc(gen_obj);
 
-    // Run the async function body synchronously until it hits Await or returns.
     let run_result = async_resume(vm, &gen_ptr, JsValue::Undefined, false);
+    if let Err(err) = run_result {
+        let reason = vm
+            .thrown_value
+            .take()
+            .unwrap_or_else(|| JsValue::string(err.message.as_str()));
+        rawjs_runtime::builtins::reject_promise_with_heap(&promise_ptr, reason, &mut vm.heap);
+    }
 
-    match run_result {
-        Ok(()) => {} // The async function suspended or completed.
-        Err(err) => {
-            // The async function threw before first await — reject the promise.
-            let reason = vm
-                .thrown_value
-                .take()
-                .unwrap_or_else(|| JsValue::string(err.message.as_str()));
-            rawjs_runtime::builtins::reject_promise_with_heap(&promise_ptr, reason, &mut vm.heap);
+    promise_ptr
+}
+
+pub(crate) fn execute_async_top_level(vm: &mut Vm, chunk_index: usize) -> Result<JsValue> {
+    let local_count = vm.chunks[chunk_index].local_count as usize;
+    let locals = vec![JsValue::Undefined; local_count];
+    let promise_ptr = start_async_chunk(vm, chunk_index, locals, Vec::new(), JsValue::Undefined);
+
+    drain_microtasks(vm)?;
+
+    let (status, value) = {
+        let promise = promise_ptr.borrow();
+        match &promise.internal {
+            ObjectInternal::Promise(state) => (state.status.clone(), state.value.clone()),
+            _ => {
+                return Err(RawJsError::internal_error(
+                    "async top-level execution did not produce a Promise",
+                ));
+            }
+        }
+    };
+
+    match status {
+        PromiseStatus::Fulfilled => Ok(value),
+        PromiseStatus::Rejected => Err(RawJsError::internal_error(format!(
+            "top-level await rejected: {}",
+            value
+        ))),
+        PromiseStatus::Pending => Err(RawJsError::internal_error("top-level await did not settle")),
+    }
+}
+
+/// Create and execute an async function call.
+///
+/// Async functions return a Promise. The function body runs synchronously
+/// until the first `Await` or `Return`.
+fn exec_async_call(
+    vm: &mut Vm,
+    chunk_index: usize,
+    args: &[JsValue],
+    upvalues: Vec<Upvalue>,
+    this_value: JsValue,
+) -> Result<()> {
+    // Set up locals with arguments.
+    let param_count = vm.chunks[chunk_index].param_count as usize;
+    let local_count = vm.chunks[chunk_index].local_count as usize;
+    let slot_count = local_count.max(param_count);
+    let mut locals = vec![JsValue::Undefined; slot_count];
+    for (i, arg) in args.iter().enumerate() {
+        if i < slot_count {
+            locals[i] = arg.clone();
         }
     }
+    let promise_ptr = start_async_chunk(vm, chunk_index, locals, upvalues, this_value);
 
     vm.push(JsValue::Object(promise_ptr));
     Ok(())
@@ -2213,6 +2290,7 @@ fn run_async_frame(
         let frame_idx = vm.call_stack.len() - 1;
         let chunk_index = vm.call_stack[frame_idx].chunk_index;
         let ip = vm.call_stack[frame_idx].ip;
+        let is_async_frame = vm.call_stack.len() == target_depth + 1;
 
         let instr_count = vm.chunks[chunk_index].instructions.len();
         if ip >= instr_count {
@@ -2242,6 +2320,19 @@ fn run_async_frame(
 
         match instruction {
             Instruction::Return => {
+                if !is_async_frame {
+                    match execute_instruction(vm, instruction) {
+                        Ok(Some(_value)) => return Ok(()),
+                        Ok(None) => continue,
+                        Err(err) => {
+                            if !unwind_exception(vm, &err)? {
+                                return Err(err);
+                            }
+                            continue;
+                        }
+                    }
+                }
+
                 // Async return: resolve the result promise.
                 let return_value = if vm.value_stack.len() > vm.call_stack.last().unwrap().base {
                     vm.pop()?
@@ -2271,81 +2362,30 @@ fn run_async_frame(
                 return Ok(());
             }
             Instruction::Await => {
-                // Save the frame state and schedule resumption.
+                if !is_async_frame {
+                    return Err(RawJsError::internal_error(
+                        "Await instruction reached outside async frame",
+                    ));
+                }
+
                 let awaited_value = vm.pop()?;
-                let frame = vm.call_stack.pop().unwrap();
-                let saved_stack: Vec<JsValue> = vm.value_stack.drain(frame.base..).collect();
-
-                // Save try_stack entries that belong to this async frame.
-                let saved_try_entries: Vec<_> = vm
-                    .try_stack
-                    .drain(try_stack_base..)
-                    .map(|ctx| {
-                        (
-                            ctx.catch_ip,
-                            ctx.finally_ip,
-                            ctx.stack_depth,
-                            ctx.call_depth,
-                        )
-                    })
-                    .collect();
-
-                // Save state back into the generator.
-                {
-                    let mut gen_obj = gen_ptr.borrow_mut();
-                    if let ObjectInternal::Generator(ref mut state) = gen_obj.internal {
-                        state.status = GeneratorStatus::SuspendedYield;
-                        state.ip = frame.ip; // Already past Await
-                        state.locals = frame.locals;
-                        state.upvalues = frame.upvalues;
-                        state.saved_stack = saved_stack;
-                        state.saved_try_stack = saved_try_entries;
-                    }
-                }
-
-                // If awaited_value is a Promise, register .then callbacks.
-                // If not, treat as immediately resolved.
-                let is_promise = match &awaited_value {
-                    JsValue::Object(ptr) => {
-                        matches!(ptr.borrow().internal, ObjectInternal::Promise(_))
-                    }
-                    _ => false,
-                };
-
-                if is_promise {
-                    // Create native onFulfilled/onRejected callbacks that
-                    // enqueue microtasks to resume the async function.
-                    let gen_ptr_clone = gen_ptr.clone();
-                    let on_fulfilled = create_async_resume_fn(
-                        vm,
-                        gen_ptr_clone.clone(),
-                        false, // not throw
-                    );
-                    let on_rejected = create_async_resume_fn(
-                        vm,
-                        gen_ptr_clone,
-                        true, // throw
-                    );
-
-                    // Call promise.then(onFulfilled, onRejected)
-                    let then_args = [JsValue::Object(on_fulfilled), JsValue::Object(on_rejected)];
-                    rawjs_runtime::builtins::promise_then_internal(
-                        &mut vm.heap,
-                        &awaited_value,
-                        &then_args,
-                    )?;
-                } else {
-                    // Not a promise — resume immediately with the value.
-                    // Enqueue a microtask to resume.
-                    let gen_ptr_clone = gen_ptr.clone();
-                    let on_fulfilled = create_async_resume_fn(vm, gen_ptr_clone, false);
-                    vm.heap.pending_microtasks.push(rawjs_runtime::MicroTask {
-                        callback: JsValue::Object(on_fulfilled),
-                        arg: awaited_value,
-                    });
-                }
-
+                suspend_async_frame(vm, gen_ptr, try_stack_base, awaited_value)?;
                 return Ok(());
+            }
+            Instruction::AsyncDisposeResource(slot) => {
+                if !is_async_frame {
+                    return Err(RawJsError::internal_error(
+                        "AsyncDisposeResource instruction reached outside async frame",
+                    ));
+                }
+
+                match prepare_dispose_resource(vm, slot, true)? {
+                    DisposeResult::Complete => continue,
+                    DisposeResult::Await(awaited_value) => {
+                        suspend_async_frame(vm, gen_ptr, try_stack_base, awaited_value)?;
+                        return Ok(());
+                    }
+                }
             }
             _ => {
                 // Normal instruction dispatch.
@@ -2364,6 +2404,63 @@ fn run_async_frame(
             }
         }
     }
+}
+
+fn suspend_async_frame(
+    vm: &mut Vm,
+    gen_ptr: &rawjs_runtime::GcPtr<JsObject>,
+    try_stack_base: usize,
+    awaited_value: JsValue,
+) -> Result<()> {
+    let frame = vm.call_stack.pop().unwrap();
+    let saved_stack: Vec<JsValue> = vm.value_stack.drain(frame.base..).collect();
+
+    let saved_try_entries: Vec<_> = vm
+        .try_stack
+        .drain(try_stack_base..)
+        .map(|ctx| {
+            (
+                ctx.catch_ip,
+                ctx.finally_ip,
+                ctx.stack_depth,
+                ctx.call_depth,
+            )
+        })
+        .collect();
+
+    {
+        let mut gen_obj = gen_ptr.borrow_mut();
+        if let ObjectInternal::Generator(ref mut state) = gen_obj.internal {
+            state.status = GeneratorStatus::SuspendedYield;
+            state.ip = frame.ip;
+            state.locals = frame.locals;
+            state.upvalues = frame.upvalues;
+            state.saved_stack = saved_stack;
+            state.saved_try_stack = saved_try_entries;
+        }
+    }
+
+    let is_promise = match &awaited_value {
+        JsValue::Object(ptr) => matches!(ptr.borrow().internal, ObjectInternal::Promise(_)),
+        _ => false,
+    };
+
+    if is_promise {
+        let gen_ptr_clone = gen_ptr.clone();
+        let on_fulfilled = create_async_resume_fn(vm, gen_ptr_clone.clone(), false);
+        let on_rejected = create_async_resume_fn(vm, gen_ptr_clone, true);
+        let then_args = [JsValue::Object(on_fulfilled), JsValue::Object(on_rejected)];
+        rawjs_runtime::builtins::promise_then_internal(&mut vm.heap, &awaited_value, &then_args)?;
+        return Ok(());
+    }
+
+    let gen_ptr_clone = gen_ptr.clone();
+    let on_fulfilled = create_async_resume_fn(vm, gen_ptr_clone, false);
+    vm.heap.pending_microtasks.push(rawjs_runtime::MicroTask {
+        callback: JsValue::Object(on_fulfilled),
+        arg: awaited_value,
+    });
+    Ok(())
 }
 
 /// Create a native function that, when called, resumes the async generator.
@@ -2391,46 +2488,85 @@ fn create_async_resume_fn(
     vm.heap.alloc(fn_obj)
 }
 
-/// Execute an `Await` instruction.
-///
 /// Dispose a resource stored in a local slot by calling its [Symbol.dispose]() method.
 /// If the local is null or undefined, this is a no-op.
 pub(crate) fn exec_dispose_resource(vm: &mut Vm, slot: u16) -> Result<()> {
+    match prepare_dispose_resource(vm, slot, false)? {
+        DisposeResult::Complete => Ok(()),
+        DisposeResult::Await(_) => Err(RawJsError::internal_error(
+            "DisposeResource unexpectedly required awaiting",
+        )),
+    }
+}
+
+fn prepare_dispose_resource(vm: &mut Vm, slot: u16, prefer_async: bool) -> Result<DisposeResult> {
     let frame = vm
         .call_stack
         .last()
         .ok_or_else(|| RawJsError::internal_error("DisposeResource: no call frame"))?;
     let resource = frame.locals[slot as usize].clone();
 
-    // null/undefined -> no-op
-    if resource.is_null() || resource.is_undefined() {
-        return Ok(());
+    if resource.is_nullish() {
+        return Ok(DisposeResult::Complete);
     }
 
-    // Look up [Symbol.dispose] on the resource.
-    let dispose_fn = match &resource {
-        JsValue::Object(ptr) => ptr
-            .borrow()
-            .get_symbol_property(rawjs_runtime::value::SYMBOL_DISPOSE),
-        _ => JsValue::Undefined,
+    let (dispose_fn, should_await) = lookup_dispose_method(&resource, prefer_async)?;
+    let result = call_zero_arg_method(vm, dispose_fn, resource)?;
+    if should_await {
+        return Ok(DisposeResult::Await(result));
+    }
+
+    Ok(DisposeResult::Complete)
+}
+
+fn lookup_dispose_method(resource: &JsValue, prefer_async: bool) -> Result<(JsValue, bool)> {
+    let JsValue::Object(ptr) = resource else {
+        return Err(RawJsError::type_error(
+            "Resource is not an object and cannot be disposed",
+        ));
     };
 
-    if dispose_fn.is_undefined() {
-        return Err(RawJsError::type_error(
-            "Resource does not have a [Symbol.dispose] method",
-        ));
+    let object = ptr.borrow();
+
+    if prefer_async {
+        let async_dispose = object.get_symbol_property(rawjs_runtime::value::SYMBOL_ASYNC_DISPOSE);
+        if !async_dispose.is_undefined() {
+            return Ok((async_dispose, true));
+        }
     }
 
-    // Call the dispose method with `this = resource`.
-    vm.push(dispose_fn);
-    exec_call(vm, 0, resource)?;
-
-    // Discard the return value if any.
-    if vm.value_stack.len() > vm.call_stack.last().map_or(0, |f| f.base) {
-        let _ = vm.pop()?;
+    let dispose = object.get_symbol_property(rawjs_runtime::value::SYMBOL_DISPOSE);
+    if !dispose.is_undefined() {
+        return Ok((dispose, false));
     }
 
-    Ok(())
+    let symbol_name = if prefer_async {
+        "[Symbol.asyncDispose] or [Symbol.dispose]"
+    } else {
+        "[Symbol.dispose]"
+    };
+    Err(RawJsError::type_error(format!(
+        "Resource does not have a {} method",
+        symbol_name
+    )))
+}
+
+fn call_zero_arg_method(vm: &mut Vm, callee: JsValue, this_value: JsValue) -> Result<JsValue> {
+    let base_depth = vm.call_stack.len();
+    let base_stack_len = vm.value_stack.len();
+
+    vm.push(callee);
+    exec_call(vm, 0, this_value)?;
+
+    if vm.call_stack.len() > base_depth {
+        run_inner_frame(vm, base_depth)?;
+    }
+
+    if vm.value_stack.len() <= base_stack_len {
+        return Ok(JsValue::Undefined);
+    }
+
+    vm.pop()
 }
 
 /// This is called from the normal instruction dispatch for async frames

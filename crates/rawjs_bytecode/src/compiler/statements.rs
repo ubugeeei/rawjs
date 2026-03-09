@@ -53,6 +53,13 @@ impl Compiler {
         let is_using = matches!(vd.kind, VarKind::Using | VarKind::AwaitUsing);
         let is_await_using = vd.kind == VarKind::AwaitUsing;
 
+        if is_await_using && !self.is_async {
+            return Err(RawJsError::syntax_error(
+                "'await using' is only valid in async functions and modules",
+                None,
+            ));
+        }
+
         for decl in &vd.declarations {
             match &decl.id {
                 Pattern::Identifier(id) => {

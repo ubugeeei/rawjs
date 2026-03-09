@@ -89,6 +89,7 @@ impl Chunk {
             Instruction::Jump(ref mut o) => *o = offset,
             Instruction::JumpIfFalse(ref mut o) => *o = offset,
             Instruction::JumpIfTrue(ref mut o) => *o = offset,
+            Instruction::JumpIfNullish(ref mut o) => *o = offset,
             Instruction::EnterTry(ref mut catch_o, _) => *catch_o = offset,
             _ => panic!(
                 "patch_jump called on non-jump instruction at index {}: {:?}",

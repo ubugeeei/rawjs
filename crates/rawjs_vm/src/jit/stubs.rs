@@ -8,7 +8,7 @@
 
 use crate::Vm;
 use rawjs_common::RawJsError;
-use rawjs_runtime::JsValue;
+use rawjs_runtime::{builtins, JsValue};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -946,6 +946,21 @@ pub extern "C" fn stub_pop_and_test_truthy(vm: *mut Vm) -> u32 {
     }
 }
 
+#[no_mangle]
+pub extern "C" fn stub_pop_and_test_nullish(vm: *mut Vm) -> u32 {
+    let vm = vm_ref(vm);
+    match vm.pop() {
+        Ok(val) => {
+            if val.is_nullish() {
+                1
+            } else {
+                0
+            }
+        }
+        Err(_) => 0,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Phase 7: Iteration & ESM stubs
 // ---------------------------------------------------------------------------
@@ -1125,6 +1140,44 @@ pub extern "C" fn stub_import_module(vm: *mut Vm, idx: u32) -> u32 {
 }
 
 #[no_mangle]
+pub extern "C" fn stub_import_module_dynamic(vm: *mut Vm) -> u32 {
+    let vm = vm_ref(vm);
+    let specifier = match vm.pop() {
+        Ok(value) => value,
+        Err(e) => return set_error(vm as *mut Vm, e),
+    };
+
+    let promise_ptr = vm.create_promise_object();
+    let source = specifier.to_string_value();
+
+    match vm.execute_module(&source) {
+        Ok(ns) => {
+            builtins::resolve_promise_with_heap(&promise_ptr, JsValue::Object(ns), &mut vm.heap)
+        }
+        Err(err) => builtins::reject_promise_with_heap(
+            &promise_ptr,
+            JsValue::string(err.to_string()),
+            &mut vm.heap,
+        ),
+    }
+
+    vm.push(JsValue::Object(promise_ptr));
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn stub_import_meta(vm: *mut Vm) -> u32 {
+    let vm = vm_ref(vm);
+    match vm.create_import_meta_object() {
+        Ok(meta_ptr) => {
+            vm.push(JsValue::Object(meta_ptr));
+            0
+        }
+        Err(err) => set_error(vm as *mut Vm, err),
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn stub_import_binding(vm: *mut Vm, idx: u32) -> u32 {
     let vm = vm_ref(vm);
     let name = {
@@ -1278,4 +1331,12 @@ pub extern "C" fn stub_dispose_resource(vm: *mut Vm, slot: u32) -> u32 {
         Ok(()) => 0,
         Err(e) => set_error(vm as *mut Vm, e),
     }
+}
+
+#[no_mangle]
+pub extern "C" fn stub_async_dispose_resource(vm: *mut Vm, _slot: u32) -> u32 {
+    set_error(
+        vm,
+        RawJsError::internal_error("AsyncDisposeResource should not execute in the baseline JIT"),
+    )
 }
