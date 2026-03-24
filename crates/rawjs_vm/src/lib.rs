@@ -1586,4 +1586,46 @@ mod tests {
         let result = vm.get_global("result").cloned().unwrap();
         assert_eq!(result, JsValue::Boolean(true));
     }
+
+    #[test]
+    fn test_execute_strict_arguments_callee_throws_type_error() {
+        let vm = execute_source(
+            r#"
+            "use strict";
+            var result = false;
+            try {
+              (function () {
+                arguments.callee;
+              })();
+            } catch (e) {
+              result = e.name === "TypeError";
+            }
+            "#,
+        );
+        let result = vm.get_global("result").cloned().unwrap();
+        assert_eq!(result, JsValue::Boolean(true));
+    }
+
+    #[test]
+    fn test_execute_strict_arguments_callee_descriptor_is_accessor() {
+        let vm = execute_source(
+            r#"
+            "use strict";
+            var result = false;
+            function testcase() {
+              var desc = Object.getOwnPropertyDescriptor(arguments, "callee");
+              result =
+                desc.configurable === false &&
+                desc.enumerable === false &&
+                desc.hasOwnProperty("value") === false &&
+                desc.hasOwnProperty("writable") === false &&
+                desc.hasOwnProperty("get") === true &&
+                desc.hasOwnProperty("set") === true;
+            }
+            testcase();
+            "#,
+        );
+        let result = vm.get_global("result").cloned().unwrap();
+        assert_eq!(result, JsValue::Boolean(true));
+    }
 }

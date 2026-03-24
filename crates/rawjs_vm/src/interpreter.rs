@@ -914,13 +914,22 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
                 };
                 obj.set_property(index.to_string(), value);
             }
-            if !is_strict {
-                if let Some(callee) = callee {
-                    obj.define_property(
-                        "callee".to_string(),
-                        rawjs_runtime::Property::builtin(JsValue::Object(callee)),
-                    );
-                }
+            if is_strict {
+                let thrower = create_strict_arguments_thrower(vm);
+                obj.define_property(
+                    "callee".to_string(),
+                    rawjs_runtime::Property::accessor(
+                        Some(JsValue::Object(thrower.clone())),
+                        Some(JsValue::Object(thrower)),
+                        false,
+                        false,
+                    ),
+                );
+            } else if let Some(callee) = callee {
+                obj.define_property(
+                    "callee".to_string(),
+                    rawjs_runtime::Property::builtin(JsValue::Object(callee)),
+                );
             }
             let arguments_obj = vm.heap.alloc(obj);
             vm.call_stack.last_mut().unwrap().arguments_object = Some(arguments_obj.clone());
@@ -1771,6 +1780,27 @@ fn exec_eval(vm: &mut Vm, args: &[JsValue]) -> Result<()> {
     };
     vm.call_stack.push(frame);
     Ok(())
+}
+
+fn strict_arguments_thrower(
+    _heap: &mut Heap,
+    _this: &JsValue,
+    _args: &[JsValue],
+) -> Result<JsValue> {
+    Err(RawJsError::type_error(
+        "Cannot access arguments.callee in strict mode",
+    ))
+}
+
+fn create_strict_arguments_thrower(vm: &mut Vm) -> rawjs_runtime::GcPtr<JsObject> {
+    let ptr = vm.heap.alloc(JsObject::native_function(
+        "ThrowTypeError",
+        strict_arguments_thrower,
+    ));
+    if let Some(proto) = &vm.function_prototype {
+        ptr.borrow_mut().prototype = Some(proto.clone());
+    }
+    ptr
 }
 
 fn sync_arguments_object_from_local(
