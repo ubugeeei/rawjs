@@ -89,12 +89,17 @@ impl Compiler {
             Expression::Assignment(assign) => self.compile_assignment(assign),
             Expression::Conditional(cond) => self.compile_conditional(cond),
             Expression::Call(call) => self.compile_call(call),
+            Expression::Import(import_expr) => self.compile_import_expression(import_expr),
             Expression::New(new_expr) => self.compile_new(new_expr),
             Expression::Member(member) => self.compile_member_load(member),
             Expression::Sequence(seq) => self.compile_sequence(seq),
             Expression::Spread(spread) => {
                 // Spread in array literals, etc. -- just compile the argument.
                 self.compile_expression(&spread.argument)
+            }
+            Expression::ImportMeta(_) => {
+                self.emit(Instruction::ImportMeta);
+                Ok(())
             }
             Expression::Yield(y) => self.compile_yield(y),
             Expression::Await(a) => self.compile_await(a),
@@ -140,6 +145,178 @@ impl Compiler {
             let idx = self.add_string_constant(name)?;
             self.emit(Instruction::StoreGlobal(idx));
         }
+        Ok(())
+    }
+
+    fn is_logical_assignment(op: AssignmentOp) -> bool {
+        matches!(
+            op,
+            AssignmentOp::AndAssign
+                | AssignmentOp::OrAssign
+                | AssignmentOp::NullishCoalescingAssign
+        )
+    }
+
+    fn compile_logical_assignment_with<F>(
+        &mut self,
+        op: AssignmentOp,
+        mut compile_assign: F,
+    ) -> Result<()>
+    where
+        F: FnMut(&mut Self) -> Result<()>,
+    {
+        self.emit(Instruction::Dup);
+
+        match op {
+            AssignmentOp::AndAssign => {
+                let skip_jump = self.emit_jump(Instruction::JumpIfFalse);
+                self.emit(Instruction::Pop);
+                compile_assign(self)?;
+                self.patch_jump_to_here(skip_jump);
+            }
+            AssignmentOp::OrAssign => {
+                let skip_jump = self.emit_jump(Instruction::JumpIfTrue);
+                self.emit(Instruction::Pop);
+                compile_assign(self)?;
+                self.patch_jump_to_here(skip_jump);
+            }
+            AssignmentOp::NullishCoalescingAssign => {
+                let assign_jump = self.emit_jump(Instruction::JumpIfNullish);
+                let end_jump = self.emit_jump(Instruction::Jump);
+                self.patch_jump_to_here(assign_jump);
+                self.emit(Instruction::Pop);
+                compile_assign(self)?;
+                self.patch_jump_to_here(end_jump);
+            }
+            _ => unreachable!(),
+        }
+
+        Ok(())
+    }
+
+    fn load_member_from_temp(
+        &mut self,
+        object_slot: u16,
+        key_slot: Option<u16>,
+        property_idx: Option<u16>,
+    ) {
+        self.emit(Instruction::LoadLocal(object_slot));
+
+        if let Some(key_slot) = key_slot {
+            self.emit(Instruction::LoadLocal(key_slot));
+            self.emit(Instruction::GetComputed);
+            return;
+        }
+
+        self.emit(Instruction::GetProperty(property_idx.unwrap()));
+    }
+
+    fn store_member_from_temp(
+        &mut self,
+        object_slot: u16,
+        key_slot: Option<u16>,
+        property_idx: Option<u16>,
+        value_slot: u16,
+    ) {
+        self.emit(Instruction::LoadLocal(object_slot));
+
+        if let Some(key_slot) = key_slot {
+            self.emit(Instruction::LoadLocal(key_slot));
+        }
+
+        self.emit(Instruction::LoadLocal(value_slot));
+
+        if key_slot.is_some() {
+            self.emit(Instruction::SetComputed);
+            return;
+        }
+
+        self.emit(Instruction::SetProperty(property_idx.unwrap()));
+    }
+
+    fn compile_logical_identifier_assignment(
+        &mut self,
+        name: &str,
+        op: AssignmentOp,
+        right: &Expression,
+    ) -> Result<()> {
+        self.compile_identifier_load(name)?;
+        self.compile_logical_assignment_with(op, |compiler| {
+            compiler.compile_expression(right)?;
+            compiler.emit(Instruction::Dup);
+            compiler.compile_identifier_store(name)
+        })
+    }
+
+    fn compile_logical_member_assignment(
+        &mut self,
+        member: &MemberExpression,
+        op: AssignmentOp,
+        right: &Expression,
+    ) -> Result<()> {
+        let property_idx = if member.computed {
+            None
+        } else {
+            let name = expression_to_property_name(&member.property)?;
+            Some(self.add_string_constant(&name)?)
+        };
+
+        self.begin_scope();
+
+        let object_slot = self.declare_temp_local("logical_obj")?;
+        let key_slot = if member.computed {
+            Some(self.declare_temp_local("logical_key")?)
+        } else {
+            None
+        };
+        let value_slot = self.declare_temp_local("logical_value")?;
+
+        self.compile_expression(&member.object)?;
+        self.emit(Instruction::StoreLocal(object_slot));
+
+        if let Some(key_slot) = key_slot {
+            self.compile_expression(&member.property)?;
+            self.emit(Instruction::StoreLocal(key_slot));
+        }
+
+        self.load_member_from_temp(object_slot, key_slot, property_idx);
+        self.compile_logical_assignment_with(op, |compiler| {
+            compiler.compile_expression(right)?;
+            compiler.emit(Instruction::StoreLocal(value_slot));
+            compiler.store_member_from_temp(object_slot, key_slot, property_idx, value_slot);
+            Ok(())
+        })?;
+
+        self.end_scope();
+        Ok(())
+    }
+
+    fn emit_optional_jump(&mut self) -> usize {
+        self.emit(Instruction::Dup);
+        self.emit_jump(Instruction::JumpIfNullish)
+    }
+
+    fn emit_optional_undefined_result(&mut self) {
+        self.emit(Instruction::Pop);
+        self.emit(Instruction::Undefined);
+    }
+
+    fn emit_optional_method_undefined_result(&mut self) {
+        self.emit(Instruction::Pop);
+        self.emit(Instruction::Pop);
+        self.emit(Instruction::Undefined);
+    }
+
+    fn compile_member_access(&mut self, member: &MemberExpression) -> Result<()> {
+        if member.computed {
+            self.compile_expression(&member.property)?;
+            self.emit(Instruction::GetComputed);
+            return Ok(());
+        }
+
+        let name = expression_to_property_name(&member.property)?;
+        let idx = self.add_string_constant(&name)?;
+        self.emit(Instruction::GetProperty(idx));
         Ok(())
     }
 
@@ -363,6 +540,26 @@ impl Compiler {
         if unary.operator == UnaryOp::Delete {
             match unary.argument.as_ref() {
                 Expression::Member(member) => {
+                    if member.optional {
+                        self.compile_expression(&member.object)?;
+                        let nullish_jump = self.emit_optional_jump();
+                        if member.computed {
+                            self.compile_expression(&member.property)?;
+                            self.emit(Instruction::Delete);
+                        } else {
+                            let name = expression_to_property_name(&member.property)?;
+                            let idx = self.add_string_constant(&name)?;
+                            self.emit(Instruction::LoadConst(idx));
+                            self.emit(Instruction::Delete);
+                        }
+                        let end_jump = self.emit_jump(Instruction::Jump);
+                        self.patch_jump_to_here(nullish_jump);
+                        self.emit(Instruction::Pop);
+                        self.emit(Instruction::True);
+                        self.patch_jump_to_here(end_jump);
+                        return Ok(());
+                    }
+
                     self.compile_expression(&member.object)?;
                     if member.computed {
                         self.compile_expression(&member.property)?;
@@ -464,6 +661,13 @@ impl Compiler {
                 }
             }
             Expression::Member(member) => {
+                if member.optional {
+                    return Err(RawJsError::syntax_error(
+                        "Invalid left-hand side expression in postfix operation",
+                        None,
+                    ));
+                }
+
                 let obj_slot = self.declare_temp_local("update_obj")?;
                 let new_slot = self.declare_temp_local("update_new")?;
                 let old_slot = if update.prefix {
@@ -471,7 +675,6 @@ impl Compiler {
                 } else {
                     Some(self.declare_temp_local("update_old")?)
                 };
-
                 self.compile_expression(&member.object)?;
                 self.emit(Instruction::StoreLocal(obj_slot));
 
@@ -632,6 +835,13 @@ impl Compiler {
                         None,
                     ));
                 }
+                if Self::is_logical_assignment(assign.operator) {
+                    return self.compile_logical_identifier_assignment(
+                        &id.name,
+                        assign.operator,
+                        &assign.right,
+                    );
+                }
                 if assign.operator == AssignmentOp::Assign {
                     self.compile_expression(&assign.right)?;
                 } else {
@@ -643,6 +853,21 @@ impl Compiler {
                 self.compile_identifier_store(&id.name)?;
             }
             Expression::Member(member) => {
+                if member.optional {
+                    return Err(RawJsError::syntax_error(
+                        "Invalid left-hand side in assignment",
+                        None,
+                    ));
+                }
+
+                if Self::is_logical_assignment(assign.operator) {
+                    return self.compile_logical_member_assignment(
+                        member,
+                        assign.operator,
+                        &assign.right,
+                    );
+                }
+
                 self.compile_expression(&member.object)?;
 
                 if member.computed {
@@ -727,46 +952,115 @@ impl Compiler {
         Ok(())
     }
 
+    fn compile_import_expression(&mut self, import_expr: &ImportExpression) -> Result<()> {
+        self.compile_expression(&import_expr.source)?;
+        self.emit(Instruction::ImportModuleDynamic);
+        Ok(())
+    }
+
     fn compile_call(&mut self, call: &CallExpression) -> Result<()> {
         // Detect method calls: obj.method(...) or obj[method](...)
         let is_method_call = matches!(&*call.callee, Expression::Member(_));
 
         if is_method_call {
-            // For method calls, push the receiver first, then the method value.
             if let Expression::Member(member) = &*call.callee {
-                // Push receiver (the object).
-                self.compile_expression(&member.object)?;
-                // Duplicate the receiver so it stays on the stack below the method.
-                self.emit(Instruction::Dup);
-                // Load the method from the receiver.
-                if member.computed {
-                    self.compile_expression(&member.property)?;
-                    self.emit(Instruction::GetComputed);
-                } else {
-                    let name = expression_to_property_name(&member.property)?;
-                    let idx = self.add_string_constant(&name)?;
-                    self.emit(Instruction::GetProperty(idx));
-                }
+                return self.compile_method_call(call, member);
             }
-        } else {
-            // Regular call: push the callee.
-            self.compile_expression(&call.callee)?;
         }
 
-        // Push arguments.
+        self.compile_expression(&call.callee)?;
+
         let argc = call.arguments.len();
         if argc > u16::MAX as usize {
             return Err(RawJsError::internal_error("Too many function arguments"));
         }
+
+        let nullish_jump = if call.optional {
+            Some(self.emit_optional_jump())
+        } else {
+            None
+        };
+
         for arg in &call.arguments {
             self.compile_expression(arg)?;
         }
 
-        if is_method_call {
-            self.emit(Instruction::CallMethod(argc as u16));
-        } else {
-            self.emit(Instruction::Call(argc as u16));
+        self.emit(Instruction::Call(argc as u16));
+
+        if let Some(nullish_jump) = nullish_jump {
+            let end_jump = self.emit_jump(Instruction::Jump);
+            self.patch_jump_to_here(nullish_jump);
+            self.emit_optional_undefined_result();
+            self.patch_jump_to_here(end_jump);
         }
+
+        Ok(())
+    }
+
+    fn compile_method_call(
+        &mut self,
+        call: &CallExpression,
+        member: &MemberExpression,
+    ) -> Result<()> {
+        self.compile_expression(&member.object)?;
+
+        let receiver_nullish_jump = if member.optional {
+            Some(self.emit_optional_jump())
+        } else {
+            None
+        };
+
+        self.emit(Instruction::Dup);
+        self.compile_member_access(member)?;
+
+        let method_nullish_jump = if call.optional {
+            Some(self.emit_optional_jump())
+        } else {
+            None
+        };
+
+        let argc = call.arguments.len();
+        if argc > u16::MAX as usize {
+            return Err(RawJsError::internal_error("Too many function arguments"));
+        }
+
+        for arg in &call.arguments {
+            self.compile_expression(arg)?;
+        }
+
+        self.emit(Instruction::CallMethod(argc as u16));
+
+        let end_jump = if receiver_nullish_jump.is_some() || method_nullish_jump.is_some() {
+            Some(self.emit_jump(Instruction::Jump))
+        } else {
+            None
+        };
+
+        let receiver_end_jump = if let Some(receiver_nullish_jump) = receiver_nullish_jump {
+            self.patch_jump_to_here(receiver_nullish_jump);
+            self.emit_optional_undefined_result();
+
+            if method_nullish_jump.is_some() {
+                Some(self.emit_jump(Instruction::Jump))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(method_nullish_jump) = method_nullish_jump {
+            self.patch_jump_to_here(method_nullish_jump);
+            self.emit_optional_method_undefined_result();
+        }
+
+        if let Some(end_jump) = end_jump {
+            self.patch_jump_to_here(end_jump);
+        }
+        if let Some(receiver_end_jump) = receiver_end_jump {
+            self.patch_jump_to_here(receiver_end_jump);
+        }
+
         Ok(())
     }
 
@@ -788,15 +1082,18 @@ impl Compiler {
 
     fn compile_member_load(&mut self, member: &MemberExpression) -> Result<()> {
         self.compile_expression(&member.object)?;
-        if member.computed {
-            self.compile_expression(&member.property)?;
-            self.emit(Instruction::GetComputed);
-        } else {
-            let name = expression_to_property_name(&member.property)?;
-            let idx = self.add_string_constant(&name)?;
-            self.emit(Instruction::GetProperty(idx));
+
+        if member.optional {
+            let nullish_jump = self.emit_optional_jump();
+            self.compile_member_access(member)?;
+            let end_jump = self.emit_jump(Instruction::Jump);
+            self.patch_jump_to_here(nullish_jump);
+            self.emit_optional_undefined_result();
+            self.patch_jump_to_here(end_jump);
+            return Ok(());
         }
-        Ok(())
+
+        self.compile_member_access(member)
     }
 
     fn compile_sequence(&mut self, seq: &SequenceExpression) -> Result<()> {

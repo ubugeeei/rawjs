@@ -1,0 +1,9 @@
+pub const X0: u8 = 0;
+pub const X1: u8 = 1;
+pub const X2: u8 = 2;
+pub const X9: u8 = 9;
+pub const X19: u8 = 19;
+pub const X20: u8 = 20;
+pub const X29: u8 = 29;
+pub const X30: u8 = 30;
+pub const SP: u8 = 31;

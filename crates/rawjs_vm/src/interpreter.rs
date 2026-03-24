@@ -10,7 +10,8 @@ use rawjs_bytecode::{Chunk, Constant, Instruction};
 use rawjs_common::{RawJsError, Result};
 use rawjs_parser::parse as parse_program;
 use rawjs_runtime::{
-    GeneratorState, GeneratorStatus, Heap, JsObject, JsValue, ObjectInternal, Property, Upvalue,
+    GcPtr, GeneratorState, GeneratorStatus, Heap, JsObject, JsValue, ObjectInternal, PromiseStatus,
+    Property, Upvalue,
 };
 
 use crate::{CallFrame, TryContext, Vm, JIT_THRESHOLD};
@@ -395,6 +396,11 @@ fn run_microtask_frame(vm: &mut Vm) -> Result<JsValue> {
 // Instruction dispatch
 // ---------------------------------------------------------------------------
 
+enum InstructionOutcome {
+    Unhandled,
+    Handled(Option<JsValue>),
+}
+
 /// Execute a single instruction.
 ///
 /// Returns:
@@ -403,17 +409,32 @@ fn run_microtask_frame(vm: &mut Vm) -> Result<JsValue> {
 ///   - `Ok(None)` for normal continuation.
 ///   - `Err(e)` for runtime errors (type errors, reference errors, etc.).
 fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue>> {
+    for outcome in [
+        execute_data_instruction(vm, instr)?,
+        execute_operator_instruction(vm, instr)?,
+        execute_control_instruction(vm, instr)?,
+        execute_object_instruction(vm, instr)?,
+        execute_exception_instruction(vm, instr)?,
+        execute_iteration_instruction(vm, instr)?,
+        execute_module_instruction(vm, instr)?,
+    ] {
+        if let InstructionOutcome::Handled(result) = outcome {
+            return Ok(result);
+        }
+    }
+    Err(RawJsError::internal_error(format!(
+        "unsupported instruction dispatch: {instr:?}"
+    )))
+}
+
+fn execute_data_instruction(vm: &mut Vm, instr: Instruction) -> Result<InstructionOutcome> {
     match instr {
-        // =================================================================
-        // Constants & literals
-        // =================================================================
         Instruction::LoadConst(idx) => {
             let frame = vm.call_stack.last().unwrap();
             let chunk = &vm.chunks[frame.chunk_index];
             let value = constant_to_value(&chunk.constants[idx as usize]);
             vm.push(value);
         }
-
         Instruction::Undefined => vm.push(JsValue::Undefined),
         Instruction::Null => vm.push(JsValue::Null),
         Instruction::True => vm.push(JsValue::Boolean(true)),
@@ -422,15 +443,8 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
             let this_val = vm.call_stack.last().unwrap().this_value.clone();
             vm.push(this_val);
         }
-
-        // =================================================================
-        // Local variables
-        // =================================================================
         Instruction::LoadLocal(idx) => {
-            let value = {
-                let frame = vm.call_stack.last().unwrap();
-                frame.locals[idx as usize].clone()
-            };
+            let value = vm.call_stack.last().unwrap().locals[idx as usize].clone();
             vm.push(value);
         }
         Instruction::StoreLocal(idx) => {
@@ -448,15 +462,8 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
                 sync_arguments_object_from_local(arguments_obj, slot as u16, value);
             }
         }
-
-        // =================================================================
-        // Global variables
-        // =================================================================
         Instruction::LoadGlobal(name_idx) => {
-            let name = {
-                let frame = vm.call_stack.last().unwrap();
-                get_constant_string(&vm.chunks[frame.chunk_index], name_idx)?
-            };
+            let name = current_constant_string(vm, name_idx)?;
             let value = vm
                 .get_global(&name)
                 .cloned()
@@ -464,202 +471,72 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
             vm.push(value);
         }
         Instruction::LoadGlobalOrUndefined(name_idx) => {
-            let name = {
-                let frame = vm.call_stack.last().unwrap();
-                get_constant_string(&vm.chunks[frame.chunk_index], name_idx)?
-            };
-            let value = vm.get_global(&name).cloned().unwrap_or(JsValue::Undefined);
-            vm.push(value);
+            let name = current_constant_string(vm, name_idx)?;
+            vm.push(vm.get_global(&name).cloned().unwrap_or(JsValue::Undefined));
         }
         Instruction::StoreGlobal(name_idx) => {
-            let name = {
-                let frame = vm.call_stack.last().unwrap();
-                get_constant_string(&vm.chunks[frame.chunk_index], name_idx)?
-            };
+            let name = current_constant_string(vm, name_idx)?;
             let value = vm.pop()?;
-            let is_strict = vm
-                .call_stack
-                .last()
-                .map(|frame| frame.is_strict)
-                .unwrap_or(false);
+            let is_strict = current_frame_is_strict(vm);
             if is_strict && vm.get_global(&name).is_none() {
-                return Err(RawJsError::reference_error(format!(
-                    "{name} is not defined"
-                )));
+                return Err(RawJsError::reference_error(format!("{name} is not defined")));
             }
             vm.set_global(name, value);
         }
         Instruction::InitGlobal(name_idx) => {
-            let name = {
-                let frame = vm.call_stack.last().unwrap();
-                get_constant_string(&vm.chunks[frame.chunk_index], name_idx)?
-            };
+            let name = current_constant_string(vm, name_idx)?;
             let value = vm.pop()?;
             vm.set_global(name, value);
         }
-
-        // =================================================================
-        // Upvalues
-        // =================================================================
         Instruction::LoadUpvalue(idx) => {
-            let value = {
-                let frame = vm.call_stack.last().unwrap();
-                frame.upvalues[idx as usize].get()
-            };
+            let value = vm.call_stack.last().unwrap().upvalues[idx as usize].get();
             vm.push(value);
         }
         Instruction::StoreUpvalue(idx) => {
             let value = vm.pop()?;
-            let frame = vm.call_stack.last().unwrap();
-            frame.upvalues[idx as usize].set(value);
+            vm.call_stack.last().unwrap().upvalues[idx as usize].set(value);
         }
-
-        // =================================================================
-        // Stack manipulation
-        // =================================================================
         Instruction::Pop => {
             vm.pop()?;
         }
         Instruction::Dup => {
-            let value = vm.peek()?.clone();
-            vm.push(value);
+            vm.push(vm.peek()?.clone());
         }
+        _ => return Ok(InstructionOutcome::Unhandled),
+    }
+    Ok(InstructionOutcome::Handled(None))
+}
 
-        // =================================================================
-        // Arithmetic
-        // =================================================================
+fn execute_operator_instruction(vm: &mut Vm, instr: Instruction) -> Result<InstructionOutcome> {
+    match instr {
         Instruction::Add => {
             let rhs = vm.pop()?;
             let lhs = vm.pop()?;
-            let result = js_add(&lhs, &rhs);
-            vm.push(result);
+            vm.push(js_add(&lhs, &rhs));
         }
-        Instruction::Sub => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(JsValue::Number(lhs.to_number() - rhs.to_number()));
-        }
-        Instruction::Mul => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(JsValue::Number(lhs.to_number() * rhs.to_number()));
-        }
-        Instruction::Div => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(JsValue::Number(lhs.to_number() / rhs.to_number()));
-        }
-        Instruction::Mod => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(JsValue::Number(lhs.to_number() % rhs.to_number()));
-        }
-        Instruction::Exp => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(JsValue::Number(lhs.to_number().powf(rhs.to_number())));
-        }
-
-        // =================================================================
-        // Bitwise
-        // =================================================================
-        Instruction::BitAnd => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(JsValue::Number((lhs.to_int32() & rhs.to_int32()) as f64));
-        }
-        Instruction::BitOr => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(JsValue::Number((lhs.to_int32() | rhs.to_int32()) as f64));
-        }
-        Instruction::BitXor => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(JsValue::Number((lhs.to_int32() ^ rhs.to_int32()) as f64));
-        }
-        Instruction::Shl => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            let shift = rhs.to_uint32() & 0x1f;
-            vm.push(JsValue::Number((lhs.to_int32() << shift) as f64));
-        }
-        Instruction::Shr => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            let shift = rhs.to_uint32() & 0x1f;
-            vm.push(JsValue::Number((lhs.to_int32() >> shift) as f64));
-        }
-        Instruction::UShr => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            let shift = rhs.to_uint32() & 0x1f;
-            vm.push(JsValue::Number((lhs.to_uint32() >> shift) as f64));
-        }
-
-        // =================================================================
-        // Comparison
-        // =================================================================
-        Instruction::Eq => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(JsValue::Boolean(lhs.abstract_eq(&rhs)));
-        }
-        Instruction::StrictEq => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(JsValue::Boolean(lhs.strict_eq(&rhs)));
-        }
-        Instruction::Ne => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(JsValue::Boolean(!lhs.abstract_eq(&rhs)));
-        }
-        Instruction::StrictNe => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(JsValue::Boolean(!lhs.strict_eq(&rhs)));
-        }
-        Instruction::Lt => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(lhs.lt(&rhs));
-        }
-        Instruction::Le => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(lhs.le(&rhs));
-        }
-        Instruction::Gt => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(lhs.gt(&rhs));
-        }
-        Instruction::Ge => {
-            let rhs = vm.pop()?;
-            let lhs = vm.pop()?;
-            vm.push(lhs.ge(&rhs));
-        }
-
-        // =================================================================
-        // Unary operators
-        // =================================================================
-        Instruction::Not => {
-            let val = vm.pop()?;
-            vm.push(JsValue::Boolean(!val.to_boolean()));
-        }
-        Instruction::BitNot => {
-            let val = vm.pop()?;
-            vm.push(JsValue::Number((!val.to_int32()) as f64));
-        }
-        Instruction::Neg => {
-            let val = vm.pop()?;
-            vm.push(JsValue::Number(-val.to_number()));
-        }
-        Instruction::Pos => {
-            let val = vm.pop()?;
-            vm.push(JsValue::Number(val.to_number()));
-        }
+        Instruction::Sub => binary_number_op(vm, |lhs, rhs| lhs - rhs)?,
+        Instruction::Mul => binary_number_op(vm, |lhs, rhs| lhs * rhs)?,
+        Instruction::Div => binary_number_op(vm, |lhs, rhs| lhs / rhs)?,
+        Instruction::Mod => binary_number_op(vm, |lhs, rhs| lhs % rhs)?,
+        Instruction::Exp => binary_number_op(vm, |lhs, rhs| lhs.powf(rhs))?,
+        Instruction::BitAnd => binary_i32_op(vm, |lhs, rhs| lhs & rhs)?,
+        Instruction::BitOr => binary_i32_op(vm, |lhs, rhs| lhs | rhs)?,
+        Instruction::BitXor => binary_i32_op(vm, |lhs, rhs| lhs ^ rhs)?,
+        Instruction::Shl => shift_i32_op(vm, |lhs, rhs| lhs << rhs)?,
+        Instruction::Shr => shift_i32_op(vm, |lhs, rhs| lhs >> rhs)?,
+        Instruction::UShr => shift_u32_op(vm)?,
+        Instruction::Eq => binary_bool_op(vm, |lhs, rhs| lhs.abstract_eq(&rhs))?,
+        Instruction::StrictEq => binary_bool_op(vm, |lhs, rhs| lhs.strict_eq(&rhs))?,
+        Instruction::Ne => binary_bool_op(vm, |lhs, rhs| !lhs.abstract_eq(&rhs))?,
+        Instruction::StrictNe => binary_bool_op(vm, |lhs, rhs| !lhs.strict_eq(&rhs))?,
+        Instruction::Lt => relational_bool_op(vm, JsValue::lt)?,
+        Instruction::Le => relational_bool_op(vm, JsValue::le)?,
+        Instruction::Gt => relational_bool_op(vm, JsValue::gt)?,
+        Instruction::Ge => relational_bool_op(vm, JsValue::ge)?,
+        Instruction::Not => unary_bool_op(vm, |value| !value.to_boolean())?,
+        Instruction::BitNot => unary_number_op(vm, |value| (!value.to_int32()) as f64)?,
+        Instruction::Neg => unary_number_op(vm, |value| -value.to_number())?,
+        Instruction::Pos => unary_number_op(vm, |value| value.to_number())?,
         Instruction::TypeOf => {
             let val = vm.pop()?;
             vm.push(JsValue::string(val.type_of()));
@@ -669,334 +546,119 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
             vm.push(JsValue::Undefined);
         }
         Instruction::Delete => {
-            // Simplified: always evaluates to `true` and discards the value.
             vm.pop()?;
             vm.push(JsValue::Boolean(true));
         }
         Instruction::DeleteName(name_idx) => {
-            let name = {
-                let frame = vm.call_stack.last().unwrap();
-                get_constant_string(&vm.chunks[frame.chunk_index], name_idx)?
-            };
+            let name = current_constant_string(vm, name_idx)?;
             vm.delete_global(&name);
             vm.push(JsValue::Boolean(true));
         }
         Instruction::DeleteProperty => {
             let key = vm.pop()?;
             let obj_val = vm.pop()?;
-            let result = match (&obj_val, &key) {
-                (JsValue::Object(ptr), JsValue::Symbol(sym)) => {
-                    ptr.borrow_mut().symbol_properties.remove(&sym.id).is_some()
-                }
-                (JsValue::Object(ptr), _) => {
-                    let key_str = key.to_string_value();
-                    let deleted = ptr.borrow_mut().delete_property(&key_str);
-                    if let Some(global_obj) = &vm.global_object {
-                        if ptr.ptr_eq(global_obj) {
-                            vm.globals.remove(&key_str);
-                        }
-                    }
-                    deleted
-                }
-                _ => true,
-            };
-            vm.push(JsValue::Boolean(result));
+            let deleted = delete_property(vm, obj_val, key);
+            vm.push(JsValue::Boolean(deleted));
         }
+        _ => return Ok(InstructionOutcome::Unhandled),
+    }
+    Ok(InstructionOutcome::Handled(None))
+}
 
-        // =================================================================
-        // Control flow
-        // =================================================================
-        Instruction::Jump(offset) => {
-            let frame = vm.call_stack.last_mut().unwrap();
-            frame.ip = ((frame.ip as i64) + (offset as i64)) as usize;
-        }
-        Instruction::JumpIfFalse(offset) => {
-            let val = vm.pop()?;
-            if !val.to_boolean() {
-                let frame = vm.call_stack.last_mut().unwrap();
-                frame.ip = ((frame.ip as i64) + (offset as i64)) as usize;
-            }
-        }
-        Instruction::JumpIfTrue(offset) => {
-            let val = vm.pop()?;
-            if val.to_boolean() {
-                let frame = vm.call_stack.last_mut().unwrap();
-                frame.ip = ((frame.ip as i64) + (offset as i64)) as usize;
-            }
-        }
-
-        // =================================================================
-        // Function calls
-        // =================================================================
+fn execute_control_instruction(vm: &mut Vm, instr: Instruction) -> Result<InstructionOutcome> {
+    match instr {
+        Instruction::Jump(offset) => jump_relative(vm, offset),
+        Instruction::JumpIfFalse(offset) => jump_if(vm, offset, false)?,
+        Instruction::JumpIfTrue(offset) => jump_if(vm, offset, true)?,
+        Instruction::JumpIfNullish(offset) => jump_if_nullish(vm, offset)?,
         Instruction::Call(argc) => {
-            let global_this = vm.global_this_value();
-            exec_call(vm, argc as usize, global_this)?;
+            exec_call(vm, argc as usize, vm.global_this_value())?;
         }
         Instruction::New(argc) => {
             exec_new(vm, argc as usize)?;
         }
-        Instruction::CallMethod(argc) => {
-            // Stack: [..., receiver, method, arg0, arg1, ...]
-            // Pop args, then method, then receiver.
-            let argc = argc as usize;
-            let stack_len = vm.value_stack.len();
-            if stack_len < argc + 2 {
-                return Err(RawJsError::internal_error("stack underflow in CallMethod"));
-            }
-            let args: Vec<JsValue> = vm.value_stack.drain(stack_len - argc..).collect();
-            let method = vm.pop()?;
-            let receiver = vm.pop()?;
-
-            // Intercept generator .next()/.return()/.throw() calls.
-            if let Some(result) = try_generator_method_call(vm, &receiver, &method, &args)? {
-                vm.push(result);
-                return Ok(None);
-            }
-
-            // Push method back then args, so exec_call sees [method, args...]
-            vm.push(method);
-            for arg in args {
-                vm.push(arg);
-            }
-            exec_call(vm, argc, receiver)?;
-        }
-        Instruction::Return => {
-            return exec_return(vm);
-        }
+        Instruction::CallMethod(argc) => execute_call_method(vm, argc as usize)?,
+        Instruction::Return => return Ok(InstructionOutcome::Handled(exec_return(vm)?)),
         Instruction::CreateClosure(const_idx) => {
             exec_create_closure(vm, const_idx)?;
         }
+        _ => return Ok(InstructionOutcome::Unhandled),
+    }
+    Ok(InstructionOutcome::Handled(None))
+}
 
-        // =================================================================
-        // Object / array creation
-        // =================================================================
+fn execute_object_instruction(vm: &mut Vm, instr: Instruction) -> Result<InstructionOutcome> {
+    match instr {
         Instruction::CreateObject => {
-            let obj = JsObject::ordinary();
-            let ptr = vm.heap.alloc(obj);
-            if let Some(ref proto) = vm.object_prototype {
-                ptr.borrow_mut().prototype = Some(proto.clone());
-            }
-            vm.push(JsValue::Object(ptr));
+            let object = create_ordinary_object(vm);
+            vm.push(JsValue::Object(object));
         }
         Instruction::CreateArray(count) => {
-            let count = count as usize;
-            let stack_len = vm.value_stack.len();
-            if count > stack_len {
-                return Err(RawJsError::internal_error("stack underflow in CreateArray"));
-            }
-            let elements: Vec<JsValue> = vm.value_stack.drain(stack_len - count..).collect();
-            let obj = JsObject::array(elements);
-            let ptr = vm.heap.alloc(obj);
-            if let Some(ref proto) = vm.array_prototype {
-                ptr.borrow_mut().prototype = Some(proto.clone());
-            }
-            vm.push(JsValue::Object(ptr));
+            let array = create_array_object(vm, count)?;
+            vm.push(JsValue::Object(array));
         }
-
-        // =================================================================
-        // Property access
-        // =================================================================
         Instruction::GetProperty(name_idx) => {
-            let name = {
-                let frame = vm.call_stack.last().unwrap();
-                get_constant_string(&vm.chunks[frame.chunk_index], name_idx)?
-            };
+            let name = current_constant_string(vm, name_idx)?;
             let obj_val = vm.pop()?;
-            let result = get_property_value(vm, &obj_val, &name)?;
-            vm.push(result);
+            let value = get_property_value(vm, &obj_val, &name)?;
+            vm.push(value);
         }
         Instruction::SetProperty(name_idx) => {
-            let name = {
-                let frame = vm.call_stack.last().unwrap();
-                get_constant_string(&vm.chunks[frame.chunk_index], name_idx)?
-            };
+            let name = current_constant_string(vm, name_idx)?;
             let value = vm.pop()?;
             let obj_val = vm.pop()?;
-            let is_strict = vm
-                .call_stack
-                .last()
-                .map(|frame| frame.is_strict)
-                .unwrap_or(false);
+            let is_strict = current_frame_is_strict(vm);
             set_property_value(vm, &obj_val, &name, &value, is_strict)?;
-            if let (JsValue::Object(ptr), Some(global_obj)) = (&obj_val, &vm.global_object) {
-                if ptr.ptr_eq(global_obj) {
-                    vm.globals.insert(name.clone(), value.clone());
-                }
-            }
+            mirror_global_property(vm, &obj_val, &name, &value);
             vm.push(value);
         }
         Instruction::GetIndex => {
-            let index = vm.pop()?;
+            let key = vm.pop()?.to_js_string();
             let obj_val = vm.pop()?;
-            let key = index.to_js_string();
-            let result = get_property_value(vm, &obj_val, &key)?;
-            vm.push(result);
+            let value = get_property_value(vm, &obj_val, &key)?;
+            vm.push(value);
         }
         Instruction::SetIndex => {
             let value = vm.pop()?;
-            let index = vm.pop()?;
+            let key = vm.pop()?.to_js_string();
             let obj_val = vm.pop()?;
-            let key = index.to_js_string();
-            let is_strict = vm
-                .call_stack
-                .last()
-                .map(|frame| frame.is_strict)
-                .unwrap_or(false);
+            let is_strict = current_frame_is_strict(vm);
             set_property_value(vm, &obj_val, &key, &value, is_strict)?;
-            if let (JsValue::Object(ptr), Some(global_obj)) = (&obj_val, &vm.global_object) {
-                if ptr.ptr_eq(global_obj) {
-                    vm.globals.insert(key.to_string(), value.clone());
-                }
-            }
+            mirror_global_property(vm, &obj_val, &key, &value);
             vm.push(value);
         }
         Instruction::GetComputed => {
             let key = vm.pop()?;
             let obj_val = vm.pop()?;
-            // Handle Symbol keys specially.
-            if let JsValue::Symbol(ref sym) = key {
-                let result = match &obj_val {
-                    JsValue::Object(ptr) => ptr.borrow().get_symbol_property(sym.id),
-                    _ => JsValue::Undefined,
-                };
-                vm.push(result);
-            } else {
-                let key_str = key.to_js_string();
-                let result = get_property_value(vm, &obj_val, &key_str)?;
-                vm.push(result);
-            }
+            let value = get_computed_value(vm, obj_val, key)?;
+            vm.push(value);
         }
         Instruction::SetComputed => {
             let value = vm.pop()?;
             let key = vm.pop()?;
             let obj_val = vm.pop()?;
-            // Handle Symbol keys specially.
-            if let JsValue::Symbol(ref sym) = key {
-                if let JsValue::Object(ref ptr) = obj_val {
-                    ptr.borrow_mut().set_symbol_property(sym.id, value.clone());
-                }
-                vm.push(value);
-            } else {
-                let key_str = key.to_js_string();
-                let is_strict = vm
-                    .call_stack
-                    .last()
-                    .map(|frame| frame.is_strict)
-                    .unwrap_or(false);
-                set_property_value(vm, &obj_val, &key_str, &value, is_strict)?;
-                if let (JsValue::Object(ptr), Some(global_obj)) = (&obj_val, &vm.global_object) {
-                    if ptr.ptr_eq(global_obj) {
-                        vm.globals.insert(key_str.to_string(), value.clone());
-                    }
-                }
-                vm.push(value);
-            }
+            set_computed_value(vm, obj_val, key, value)?;
         }
         Instruction::LoadArguments => {
-            if let Some(arguments_obj) = vm
-                .call_stack
-                .last()
-                .and_then(|frame| frame.arguments_object.clone())
-            {
-                vm.push(JsValue::Object(arguments_obj));
-                return Ok(None);
-            }
-
-            let args = vm
-                .call_stack
-                .last()
-                .map(|frame| frame.arguments.clone())
-                .unwrap_or_default();
-            let locals = vm
-                .call_stack
-                .last()
-                .map(|frame| frame.locals.clone())
-                .unwrap_or_default();
-            let is_strict = vm
-                .call_stack
-                .last()
-                .map(|frame| frame.is_strict)
-                .unwrap_or(false);
-            let callee = vm.call_stack.last().and_then(|frame| frame.callee.clone());
-            let param_count = vm
-                .call_stack
-                .last()
-                .map(|frame| vm.chunks[frame.chunk_index].param_count as usize)
-                .unwrap_or(0);
-            let mut obj = JsObject::ordinary();
-            if let Some(proto) = &vm.object_prototype {
-                obj.prototype = Some(proto.clone());
-            }
-            obj.internal = ObjectInternal::ArgumentsObject(
-                (0..args.len())
-                    .map(|index| {
-                        if !is_strict && index < param_count {
-                            Some(index as u16)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
-            );
-            obj.define_property(
-                "length".to_string(),
-                rawjs_runtime::Property::builtin(JsValue::Number(args.len() as f64)),
-            );
-            for (index, arg) in args.into_iter().enumerate() {
-                let value = if !is_strict && index < locals.len() && index < param_count {
-                    locals[index].clone()
-                } else {
-                    arg
-                };
-                obj.set_property(index.to_string(), value);
-            }
-            if is_strict {
-                let thrower = create_strict_arguments_thrower(vm);
-                obj.define_property(
-                    "callee".to_string(),
-                    rawjs_runtime::Property::accessor(
-                        Some(JsValue::Object(thrower.clone())),
-                        Some(JsValue::Object(thrower)),
-                        false,
-                        false,
-                    ),
-                );
-            } else if let Some(callee) = callee {
-                obj.define_property(
-                    "callee".to_string(),
-                    rawjs_runtime::Property::builtin(JsValue::Object(callee)),
-                );
-            }
-            let arguments_obj = vm.heap.alloc(obj);
-            vm.call_stack.last_mut().unwrap().arguments_object = Some(arguments_obj.clone());
-            vm.push(JsValue::Object(arguments_obj));
+            load_arguments_object(vm)?;
         }
+        _ => return Ok(InstructionOutcome::Unhandled),
+    }
+    Ok(InstructionOutcome::Handled(None))
+}
 
-        // =================================================================
-        // Exception handling
-        // =================================================================
+fn execute_exception_instruction(vm: &mut Vm, instr: Instruction) -> Result<InstructionOutcome> {
+    match instr {
         Instruction::Throw => {
             let value = vm.pop()?;
-            // Save the thrown JS value so catch handlers can access it.
             vm.thrown_value = Some(value.clone());
-            let msg = format!("{}", value);
-            return Err(RawJsError::internal_error(msg));
+            return Err(RawJsError::internal_error(format!("{}", value)));
         }
         Instruction::EnterTry(catch_offset, finally_offset) => {
             let frame = vm.call_stack.last().unwrap();
-            let current_ip = frame.ip; // already advanced past EnterTry
-
-            let catch_ip = if catch_offset != 0 {
-                Some(((current_ip as i64) + (catch_offset as i64)) as usize)
-            } else {
-                None
-            };
-            let finally_ip = if finally_offset != 0 {
-                Some(((current_ip as i64) + (finally_offset as i64)) as usize)
-            } else {
-                None
-            };
-
+            let current_ip = frame.ip;
+            let catch_ip = offset_to_ip(current_ip, catch_offset);
+            let finally_ip = offset_to_ip(current_ip, finally_offset);
             vm.try_stack.push(TryContext {
                 catch_ip,
                 finally_ip,
@@ -1007,16 +669,11 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
         Instruction::LeaveTry => {
             vm.try_stack.pop();
         }
-
-        // =================================================================
-        // Relational keywords
-        // =================================================================
         Instruction::In => {
             let obj_val = vm.pop()?;
-            let key = vm.pop()?;
-            let key_str = key.to_js_string();
+            let key = vm.pop()?.to_js_string();
             let result = match &obj_val {
-                JsValue::Object(ptr) => ptr.borrow().has_own_property(&key_str),
+                JsValue::Object(ptr) => ptr.borrow().has_own_property(&key),
                 _ => false,
             };
             vm.push(JsValue::Boolean(result));
@@ -1026,49 +683,322 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
             let lhs = vm.pop()?;
             vm.push(JsValue::Boolean(lhs.instance_of(&rhs)));
         }
+        _ => return Ok(InstructionOutcome::Unhandled),
+    }
+    Ok(InstructionOutcome::Handled(None))
+}
 
-        // =================================================================
-        // Iterator (for-of)
-        // =================================================================
+fn execute_iteration_instruction(vm: &mut Vm, instr: Instruction) -> Result<InstructionOutcome> {
+    match instr {
         Instruction::GetIterator => {
-            let obj_val = vm.pop()?;
-            // Generators are already iterators — return as-is.
-            if let JsValue::Object(ref ptr) = obj_val {
-                let is_gen = matches!(ptr.borrow().internal, ObjectInternal::Generator(_));
-                if is_gen {
-                    vm.push(obj_val);
-                    return Ok(None);
+            let iterable = vm.pop()?;
+            let iterator = create_iterator_value(vm, iterable)?;
+            vm.push(iterator);
+        }
+        Instruction::IteratorNext => iterator_next(vm)?,
+        Instruction::IteratorDone(exit_offset) => iterator_done(vm, exit_offset)?,
+        Instruction::ForInInit => init_for_in(vm)?,
+        Instruction::ForInNext(exit_offset) => advance_for_in(vm, exit_offset)?,
+        Instruction::PostfixIncrement => postfix_update(vm, 1.0)?,
+        Instruction::PostfixDecrement => postfix_update(vm, -1.0)?,
+        _ => return Ok(InstructionOutcome::Unhandled),
+    }
+    Ok(InstructionOutcome::Handled(None))
+}
+
+fn current_constant_string(vm: &Vm, index: u16) -> Result<String> {
+    let frame = vm.call_stack.last().unwrap();
+    get_constant_string(&vm.chunks[frame.chunk_index], index)
+}
+
+fn current_frame_is_strict(vm: &Vm) -> bool {
+    vm.call_stack
+        .last()
+        .map(|frame| frame.is_strict)
+        .unwrap_or(false)
+}
+
+fn binary_number_op<F>(vm: &mut Vm, op: F) -> Result<()>
+where
+    F: FnOnce(f64, f64) -> f64,
+{
+    let rhs = vm.pop()?;
+    let lhs = vm.pop()?;
+    vm.push(JsValue::Number(op(lhs.to_number(), rhs.to_number())));
+    Ok(())
+}
+
+fn binary_i32_op<F>(vm: &mut Vm, op: F) -> Result<()>
+where
+    F: FnOnce(i32, i32) -> i32,
+{
+    let rhs = vm.pop()?;
+    let lhs = vm.pop()?;
+    vm.push(JsValue::Number(op(lhs.to_int32(), rhs.to_int32()) as f64));
+    Ok(())
+}
+
+fn shift_i32_op<F>(vm: &mut Vm, op: F) -> Result<()>
+where
+    F: FnOnce(i32, u32) -> i32,
+{
+    let rhs = vm.pop()?;
+    let lhs = vm.pop()?;
+    let shift = rhs.to_uint32() & 0x1f;
+    vm.push(JsValue::Number(op(lhs.to_int32(), shift) as f64));
+    Ok(())
+}
+
+fn shift_u32_op(vm: &mut Vm) -> Result<()> {
+    let rhs = vm.pop()?;
+    let lhs = vm.pop()?;
+    let shift = rhs.to_uint32() & 0x1f;
+    vm.push(JsValue::Number((lhs.to_uint32() >> shift) as f64));
+    Ok(())
+}
+
+fn binary_bool_op<F>(vm: &mut Vm, op: F) -> Result<()>
+where
+    F: FnOnce(JsValue, JsValue) -> bool,
+{
+    let rhs = vm.pop()?;
+    let lhs = vm.pop()?;
+    vm.push(JsValue::Boolean(op(lhs, rhs)));
+    Ok(())
+}
+
+fn relational_bool_op(
+    vm: &mut Vm,
+    op: fn(&JsValue, &JsValue) -> JsValue,
+) -> Result<()> {
+    let rhs = vm.pop()?;
+    let lhs = vm.pop()?;
+    vm.push(op(&lhs, &rhs));
+    Ok(())
+}
+
+fn unary_bool_op<F>(vm: &mut Vm, op: F) -> Result<()>
+where
+    F: FnOnce(JsValue) -> bool,
+{
+    let value = vm.pop()?;
+    vm.push(JsValue::Boolean(op(value)));
+    Ok(())
+}
+
+fn unary_number_op<F>(vm: &mut Vm, op: F) -> Result<()>
+where
+    F: FnOnce(JsValue) -> f64,
+{
+    let value = vm.pop()?;
+    vm.push(JsValue::Number(op(value)));
+    Ok(())
+}
+
+fn delete_property(vm: &mut Vm, obj_val: JsValue, key: JsValue) -> bool {
+    match (&obj_val, &key) {
+        (JsValue::Object(ptr), JsValue::Symbol(sym)) => {
+            ptr.borrow_mut().symbol_properties.remove(&sym.id).is_some()
+        }
+        (JsValue::Object(ptr), _) => {
+            let key_str = key.to_string_value();
+            let deleted = ptr.borrow_mut().delete_property(&key_str);
+            if let Some(global_obj) = &vm.global_object {
+                if ptr.ptr_eq(global_obj) {
+                    vm.globals.remove(&key_str);
                 }
             }
-            // Create an iterator from the object.
-            // For arrays: iterate over elements.
-            // For strings: iterate over characters.
-            // For Sets: iterate over values.
-            // For Maps: iterate over [key, value] pairs.
-            let values: Vec<JsValue> = match &obj_val {
-                JsValue::Object(ptr) => {
-                    let obj = ptr.borrow();
-                    match &obj.internal {
-                        ObjectInternal::Array(elements) => elements.clone(),
-                        ObjectInternal::Set(set_values) => set_values.clone(),
-                        ObjectInternal::Map(entries) => entries
-                            .iter()
-                            .map(|(k, v)| {
-                                let pair = vec![k.clone(), v.clone()];
-                                JsValue::Object(rawjs_runtime::GcPtr::new(JsObject::array(pair)))
-                            })
-                            .collect(),
-                        _ => {
-                            return Err(RawJsError::type_error(format!(
-                                "{} is not iterable",
-                                obj_val.type_of()
-                            )));
-                        }
-                    }
-                }
-                JsValue::String(s) => s
-                    .chars()
-                    .map(|c| JsValue::string(c.to_string().as_str()))
+            deleted
+        }
+        _ => true,
+    }
+}
+
+fn jump_relative(vm: &mut Vm, offset: i32) {
+    let frame = vm.call_stack.last_mut().unwrap();
+    frame.ip = ((frame.ip as i64) + (offset as i64)) as usize;
+}
+
+fn jump_if(vm: &mut Vm, offset: i32, expected: bool) -> Result<()> {
+    let value = vm.pop()?;
+    if value.to_boolean() == expected {
+        jump_relative(vm, offset);
+    }
+    Ok(())
+}
+
+fn jump_if_nullish(vm: &mut Vm, offset: i32) -> Result<()> {
+    if vm.pop()?.is_nullish() {
+        jump_relative(vm, offset);
+    }
+    Ok(())
+}
+
+fn execute_call_method(vm: &mut Vm, argc: usize) -> Result<()> {
+    let stack_len = vm.value_stack.len();
+    if stack_len < argc + 2 {
+        return Err(RawJsError::internal_error("stack underflow in CallMethod"));
+    }
+    let args: Vec<JsValue> = vm.value_stack.drain(stack_len - argc..).collect();
+    let method = vm.pop()?;
+    let receiver = vm.pop()?;
+
+    if let Some(result) = try_generator_method_call(vm, &receiver, &method, &args)? {
+        vm.push(result);
+        return Ok(());
+    }
+
+    vm.push(method);
+    for arg in args {
+        vm.push(arg);
+    }
+    exec_call(vm, argc, receiver)
+}
+
+fn create_ordinary_object(vm: &mut Vm) -> GcPtr<JsObject> {
+    let ptr = vm.heap.alloc(JsObject::ordinary());
+    if let Some(ref proto) = vm.object_prototype {
+        ptr.borrow_mut().prototype = Some(proto.clone());
+    }
+    ptr
+}
+
+fn create_array_object(vm: &mut Vm, count: u16) -> Result<GcPtr<JsObject>> {
+    let count = count as usize;
+    let stack_len = vm.value_stack.len();
+    if count > stack_len {
+        return Err(RawJsError::internal_error("stack underflow in CreateArray"));
+    }
+    let elements: Vec<JsValue> = vm.value_stack.drain(stack_len - count..).collect();
+    let ptr = vm.heap.alloc(JsObject::array(elements));
+    if let Some(ref proto) = vm.array_prototype {
+        ptr.borrow_mut().prototype = Some(proto.clone());
+    }
+    Ok(ptr)
+}
+
+fn mirror_global_property(vm: &mut Vm, obj_val: &JsValue, key: &str, value: &JsValue) {
+    if let (JsValue::Object(ptr), Some(global_obj)) = (obj_val, &vm.global_object) {
+        if ptr.ptr_eq(global_obj) {
+            vm.globals.insert(key.to_string(), value.clone());
+        }
+    }
+}
+
+fn get_computed_value(vm: &mut Vm, obj_val: JsValue, key: JsValue) -> Result<JsValue> {
+    if let JsValue::Symbol(sym) = key {
+        return Ok(match &obj_val {
+            JsValue::Object(ptr) => ptr.borrow().get_symbol_property(sym.id),
+            _ => JsValue::Undefined,
+        });
+    }
+    let key_str = key.to_js_string();
+    get_property_value(vm, &obj_val, &key_str)
+}
+
+fn set_computed_value(
+    vm: &mut Vm,
+    obj_val: JsValue,
+    key: JsValue,
+    value: JsValue,
+) -> Result<()> {
+    if let JsValue::Symbol(sym) = key {
+        if let JsValue::Object(ref ptr) = obj_val {
+            ptr.borrow_mut().set_symbol_property(sym.id, value.clone());
+        }
+        vm.push(value);
+        return Ok(());
+    }
+
+    let key_str = key.to_js_string();
+    let is_strict = current_frame_is_strict(vm);
+    set_property_value(vm, &obj_val, &key_str, &value, is_strict)?;
+    mirror_global_property(vm, &obj_val, &key_str, &value);
+    vm.push(value);
+    Ok(())
+}
+
+fn load_arguments_object(vm: &mut Vm) -> Result<()> {
+    if let Some(arguments_obj) = vm
+        .call_stack
+        .last()
+        .and_then(|frame| frame.arguments_object.clone())
+    {
+        vm.push(JsValue::Object(arguments_obj));
+        return Ok(());
+    }
+
+    let frame = vm.call_stack.last().unwrap();
+    let args = frame.arguments.clone();
+    let locals = frame.locals.clone();
+    let is_strict = frame.is_strict;
+    let callee = frame.callee.clone();
+    let param_count = vm.chunks[frame.chunk_index].param_count as usize;
+
+    let mut obj = JsObject::ordinary();
+    if let Some(proto) = &vm.object_prototype {
+        obj.prototype = Some(proto.clone());
+    }
+    obj.internal = ObjectInternal::ArgumentsObject(
+        (0..args.len())
+            .map(|index| (!is_strict && index < param_count).then_some(index as u16))
+            .collect(),
+    );
+    obj.define_property(
+        "length".to_string(),
+        rawjs_runtime::Property::builtin(JsValue::Number(args.len() as f64)),
+    );
+    for (index, arg) in args.into_iter().enumerate() {
+        let value = if !is_strict && index < locals.len() && index < param_count {
+            locals[index].clone()
+        } else {
+            arg
+        };
+        obj.set_property(index.to_string(), value);
+    }
+    if is_strict {
+        let thrower = create_strict_arguments_thrower(vm);
+        obj.define_property(
+            "callee".to_string(),
+            rawjs_runtime::Property::accessor(
+                Some(JsValue::Object(thrower.clone())),
+                Some(JsValue::Object(thrower)),
+                false,
+                false,
+            ),
+        );
+    } else if let Some(callee) = callee {
+        obj.define_property(
+            "callee".to_string(),
+            rawjs_runtime::Property::builtin(JsValue::Object(callee)),
+        );
+    }
+    let arguments_obj = vm.heap.alloc(obj);
+    vm.call_stack.last_mut().unwrap().arguments_object = Some(arguments_obj.clone());
+    vm.push(JsValue::Object(arguments_obj));
+    Ok(())
+}
+
+fn offset_to_ip(current_ip: usize, offset: i32) -> Option<usize> {
+    (offset != 0).then_some(((current_ip as i64) + (offset as i64)) as usize)
+}
+
+fn create_iterator_value(vm: &mut Vm, obj_val: JsValue) -> Result<JsValue> {
+    if let JsValue::Object(ref ptr) = obj_val {
+        if matches!(ptr.borrow().internal, ObjectInternal::Generator(_)) {
+            return Ok(obj_val);
+        }
+    }
+
+    let values: Vec<JsValue> = match &obj_val {
+        JsValue::Object(ptr) => {
+            let obj = ptr.borrow();
+            match &obj.internal {
+                ObjectInternal::Array(elements) => elements.clone(),
+                ObjectInternal::Set(set_values) => set_values.clone(),
+                ObjectInternal::Map(entries) => entries
+                    .iter()
+                    .map(|(k, v)| JsValue::Object(GcPtr::new(JsObject::array(vec![k.clone(), v.clone()]))))
                     .collect(),
                 _ => {
                     return Err(RawJsError::type_error(format!(
@@ -1076,158 +1006,167 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
                         obj_val.type_of()
                     )));
                 }
-            };
-            let iter_obj = JsObject::iterator(values);
-            let ptr = vm.heap.alloc(iter_obj);
-            vm.push(JsValue::Object(ptr));
-        }
-        Instruction::IteratorNext => {
-            // Stack: [..., iterator] -> [..., iterator, result_value, done_bool]
-            let iter_val = vm.peek()?.clone();
-            match &iter_val {
-                JsValue::Object(ptr) => {
-                    // Check if it's a generator — call .next()
-                    let is_gen = {
-                        let obj = ptr.borrow();
-                        matches!(obj.internal, ObjectInternal::Generator(_))
-                    };
-                    if is_gen {
-                        let result = generator_next(vm, ptr, JsValue::Undefined)?;
-                        // result is {value, done} object
-                        let (value, done) = if let JsValue::Object(p) = &result {
-                            let obj = p.borrow();
-                            (
-                                obj.get_property("value"),
-                                obj.get_property("done").to_boolean(),
-                            )
-                        } else {
-                            (JsValue::Undefined, true)
-                        };
-                        vm.push(value);
-                        vm.push(JsValue::Boolean(done));
-                    } else {
-                        let mut obj = ptr.borrow_mut();
-                        match &mut obj.internal {
-                            ObjectInternal::Iterator(state) => {
-                                let (value, done) = state.advance();
-                                drop(obj);
-                                vm.push(value);
-                                vm.push(JsValue::Boolean(done));
-                            }
-                            _ => {
-                                return Err(RawJsError::type_error("not an iterator"));
-                            }
-                        }
-                    }
-                }
-                _ => {
-                    return Err(RawJsError::type_error("not an iterator"));
-                }
             }
         }
-        Instruction::IteratorDone(exit_offset) => {
-            // Stack: [..., iterator, value, done]
-            let done = vm.pop()?;
-            if done.to_boolean() {
-                // Done: pop the value, leave iterator on stack for cleanup.
-                vm.pop()?; // pop value (undefined)
-                let frame = vm.call_stack.last_mut().unwrap();
-                frame.ip = ((frame.ip as i64) + (exit_offset as i64)) as usize;
-            }
-            // Not done: stack is [..., iterator, value] — value is ready for use.
+        JsValue::String(s) => s
+            .chars()
+            .map(|c| JsValue::string(c.to_string().as_str()))
+            .collect(),
+        _ => {
+            return Err(RawJsError::type_error(format!(
+                "{} is not iterable",
+                obj_val.type_of()
+            )));
         }
+    };
+    Ok(JsValue::Object(vm.heap.alloc(JsObject::iterator(values))))
+}
 
-        // =================================================================
-        // For-in iteration
-        // =================================================================
-        Instruction::ForInInit => {
-            let obj_val = vm.pop()?;
-            // Collect all enumerable keys from the object (and its prototype chain).
-            let keys: Vec<JsValue> = match &obj_val {
-                JsValue::Object(ptr) => {
-                    let obj = ptr.borrow();
-                    obj.own_enumerable_keys()
-                        .into_iter()
-                        .map(|k| JsValue::string(k.as_str()))
-                        .collect()
-                }
-                _ => Vec::new(),
-            };
-            let arr_obj = JsObject::array(keys);
-            let arr_ptr = vm.heap.alloc(arr_obj);
-            vm.push(JsValue::Object(arr_ptr)); // keys array
-            vm.push(JsValue::Number(0.0)); // starting index
-        }
-        Instruction::ForInNext(exit_offset) => {
-            // Stack: [..., keys_array, index]
-            let index_val = vm.pop()?;
-            let index = index_val.to_number() as usize;
-            let keys_val = vm.peek()?.clone();
-
-            let len = match &keys_val {
-                JsValue::Object(ptr) => {
-                    let obj = ptr.borrow();
-                    obj.array_length()
-                }
-                _ => 0,
-            };
-
-            if index >= len {
-                // Iteration complete. Push index back (stack: [..., keys_array, index])
-                // and jump to exit.
-                vm.push(index_val);
-                let frame = vm.call_stack.last_mut().unwrap();
-                frame.ip = ((frame.ip as i64) + (exit_offset as i64)) as usize;
-            } else {
-                // Get the key at `index`.
-                let key = match &keys_val {
-                    JsValue::Object(ptr) => {
-                        let obj = ptr.borrow();
-                        obj.get_element(index)
-                    }
-                    _ => JsValue::Undefined,
+fn iterator_next(vm: &mut Vm) -> Result<()> {
+    let iter_val = vm.peek()?.clone();
+    match &iter_val {
+        JsValue::Object(ptr) => {
+            if matches!(ptr.borrow().internal, ObjectInternal::Generator(_)) {
+                let result = generator_next(vm, ptr, JsValue::Undefined)?;
+                let (value, done) = if let JsValue::Object(p) = &result {
+                    let obj = p.borrow();
+                    (obj.get_property("value"), obj.get_property("done").to_boolean())
+                } else {
+                    (JsValue::Undefined, true)
                 };
-                // Push updated index, then the key.
-                // Stack: [..., keys_array, index+1, key]
-                vm.push(JsValue::Number((index + 1) as f64));
-                vm.push(key);
+                vm.push(value);
+                vm.push(JsValue::Boolean(done));
+                return Ok(());
+            }
+
+            let mut obj = ptr.borrow_mut();
+            match &mut obj.internal {
+                ObjectInternal::Iterator(state) => {
+                    let (value, done) = state.advance();
+                    drop(obj);
+                    vm.push(value);
+                    vm.push(JsValue::Boolean(done));
+                    Ok(())
+                }
+                _ => Err(RawJsError::type_error("not an iterator")),
             }
         }
+        _ => Err(RawJsError::type_error("not an iterator")),
+    }
+}
 
-        // =================================================================
-        // Postfix increment / decrement
-        // =================================================================
-        Instruction::PostfixIncrement => {
-            let val = vm.pop()?;
-            let n = val.to_number();
-            // Push the *original* value -- the variable update is the
-            // compiler's responsibility via a subsequent StoreLocal/StoreGlobal.
-            vm.push(JsValue::Number(n));
-            vm.push(JsValue::Number(n + 1.0));
-        }
-        Instruction::PostfixDecrement => {
-            let val = vm.pop()?;
-            let n = val.to_number();
-            vm.push(JsValue::Number(n));
-            vm.push(JsValue::Number(n - 1.0));
-        }
+fn iterator_done(vm: &mut Vm, exit_offset: i32) -> Result<()> {
+    if vm.pop()?.to_boolean() {
+        vm.pop()?;
+        jump_relative(vm, exit_offset);
+    }
+    Ok(())
+}
 
-        // =================================================================
-        // ESM: import / export
-        // =================================================================
+fn init_for_in(vm: &mut Vm) -> Result<()> {
+    let obj_val = vm.pop()?;
+    let keys: Vec<JsValue> = match &obj_val {
+        JsValue::Object(ptr) => ptr
+            .borrow()
+            .own_enumerable_keys()
+            .into_iter()
+            .map(|k| JsValue::string(k.as_str()))
+            .collect(),
+        _ => Vec::new(),
+    };
+    let keys_obj = vm.heap.alloc(JsObject::array(keys));
+    vm.push(JsValue::Object(keys_obj));
+    vm.push(JsValue::Number(0.0));
+    Ok(())
+}
+
+fn advance_for_in(vm: &mut Vm, exit_offset: i32) -> Result<()> {
+    let index_val = vm.pop()?;
+    let index = index_val.to_number() as usize;
+    let keys_val = vm.peek()?.clone();
+    let len = match &keys_val {
+        JsValue::Object(ptr) => ptr.borrow().array_length(),
+        _ => 0,
+    };
+
+    if index >= len {
+        vm.push(index_val);
+        jump_relative(vm, exit_offset);
+        return Ok(());
+    }
+
+    let key = match &keys_val {
+        JsValue::Object(ptr) => ptr.borrow().get_element(index),
+        _ => JsValue::Undefined,
+    };
+    vm.push(JsValue::Number((index + 1) as f64));
+    vm.push(key);
+    Ok(())
+}
+
+fn postfix_update(vm: &mut Vm, delta: f64) -> Result<()> {
+    let value = vm.pop()?;
+    let number = value.to_number();
+    vm.push(JsValue::Number(number));
+    vm.push(JsValue::Number(number + delta));
+    Ok(())
+}
+
+fn import_module_dynamic(vm: &mut Vm) -> Result<()> {
+    let specifier = vm.pop()?;
+    let promise_ptr = vm.create_promise_object();
+    let source = specifier.to_string_value();
+    match vm.execute_module(&source) {
+        Ok(ns) => rawjs_runtime::builtins::resolve_promise_with_heap(
+            &promise_ptr,
+            JsValue::Object(ns),
+            &mut vm.heap,
+        ),
+        Err(err) => rawjs_runtime::builtins::reject_promise_with_heap(
+            &promise_ptr,
+            JsValue::string(err.to_string()),
+            &mut vm.heap,
+        ),
+    }
+    vm.push(JsValue::Object(promise_ptr));
+    Ok(())
+}
+
+fn export_binding(vm: &mut Vm, name_idx: u16) -> Result<()> {
+    let name = current_constant_string(vm, name_idx)?;
+    let value = vm.pop()?;
+    if let Some(ref exports) = vm.module_exports.clone() {
+        exports.borrow_mut().set_property(name, value);
+    }
+    Ok(())
+}
+
+fn export_default(vm: &mut Vm) -> Result<()> {
+    let value = vm.pop()?;
+    if let Some(ref exports) = vm.module_exports.clone() {
+        exports
+            .borrow_mut()
+            .set_property("default".to_string(), value);
+    }
+    Ok(())
+}
+
+fn execute_module_instruction(vm: &mut Vm, instr: Instruction) -> Result<InstructionOutcome> {
+    match instr {
         Instruction::ImportModule(source_idx) => {
-            let source = {
-                let frame = vm.call_stack.last().unwrap();
-                get_constant_string(&vm.chunks[frame.chunk_index], source_idx)?
-            };
+            let source = current_constant_string(vm, source_idx)?;
             let ns = vm.execute_module(&source)?;
             vm.push(JsValue::Object(ns));
         }
+        Instruction::ImportModuleDynamic => {
+            import_module_dynamic(vm)?;
+        }
+        Instruction::ImportMeta => {
+            let import_meta = vm.create_import_meta_object()?;
+            vm.push(JsValue::Object(import_meta));
+        }
         Instruction::ImportBinding(name_idx) => {
-            let name = {
-                let frame = vm.call_stack.last().unwrap();
-                get_constant_string(&vm.chunks[frame.chunk_index], name_idx)?
-            };
+            let name = current_constant_string(vm, name_idx)?;
             let ns = vm.pop()?;
             let value = match &ns {
                 JsValue::Object(ptr) => ptr.borrow().get_property(&name),
@@ -1235,46 +1174,24 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
             };
             vm.push(value);
         }
-        Instruction::ExportBinding(name_idx) => {
-            let name = {
-                let frame = vm.call_stack.last().unwrap();
-                get_constant_string(&vm.chunks[frame.chunk_index], name_idx)?
-            };
-            let value = vm.pop()?;
-            if let Some(ref exports) = vm.module_exports.clone() {
-                exports.borrow_mut().set_property(name, value);
-            }
-        }
-        Instruction::ExportDefault => {
-            let value = vm.pop()?;
-            if let Some(ref exports) = vm.module_exports.clone() {
-                exports
-                    .borrow_mut()
-                    .set_property("default".to_string(), value);
-            }
-        }
-
-        // =================================================================
-        // Generator / async
-        // =================================================================
+        Instruction::ExportBinding(name_idx) => export_binding(vm, name_idx)?,
+        Instruction::ExportDefault => export_default(vm)?,
         Instruction::CreateGenerator => {
-            // Should not be reached; generator creation is handled in exec_call.
             return Err(RawJsError::internal_error(
                 "CreateGenerator should not be executed directly",
             ));
         }
-        Instruction::Yield => {
-            return exec_yield(vm);
+        Instruction::Yield => return Ok(InstructionOutcome::Handled(exec_yield(vm)?)),
+        Instruction::Await => return Ok(InstructionOutcome::Handled(exec_await(vm)?)),
+        Instruction::DisposeResource(slot) => exec_dispose_resource(vm, slot)?,
+        Instruction::AsyncDisposeResource(_) => {
+            return Err(RawJsError::internal_error(
+                "AsyncDisposeResource instruction reached outside async frame",
+            ));
         }
-        Instruction::Await => {
-            return exec_await(vm);
-        }
-        Instruction::DisposeResource(slot) => {
-            exec_dispose_resource(vm, slot)?;
-        }
+        _ => return Ok(InstructionOutcome::Unhandled),
     }
-
-    Ok(None)
+    Ok(InstructionOutcome::Handled(None))
 }
 
 // ---------------------------------------------------------------------------
@@ -2803,9 +2720,93 @@ fn make_iterator_result(vm: &mut Vm, value: JsValue, done: bool) -> JsValue {
     JsValue::Object(vm.heap.alloc(obj))
 }
 
+enum DisposeResult {
+    Complete,
+    Await(JsValue),
+}
+
 // ---------------------------------------------------------------------------
 // Async function stubs (Phase 2)
 // ---------------------------------------------------------------------------
+
+fn create_async_result_promise(vm: &mut Vm) -> GcPtr<JsObject> {
+    vm.create_promise_object()
+}
+
+fn start_async_chunk(
+    vm: &mut Vm,
+    chunk_index: usize,
+    locals: Vec<JsValue>,
+    arguments: Vec<JsValue>,
+    upvalues: Vec<Upvalue>,
+    this_value: JsValue,
+) -> GcPtr<JsObject> {
+    let promise_ptr = create_async_result_promise(vm);
+
+    let state = GeneratorState {
+        status: GeneratorStatus::SuspendedStart,
+        chunk_index,
+        ip: 0,
+        locals,
+        arguments,
+        upvalues,
+        saved_stack: Vec::new(),
+        this_value,
+        result_promise: Some(promise_ptr.clone()),
+        saved_try_stack: Vec::new(),
+    };
+
+    let mut gen_obj = JsObject::ordinary();
+    gen_obj.internal = ObjectInternal::Generator(state);
+    let gen_ptr = vm.heap.alloc(gen_obj);
+
+    let run_result = async_resume(vm, &gen_ptr, JsValue::Undefined, false);
+    if let Err(err) = run_result {
+        let reason = vm
+            .thrown_value
+            .take()
+            .unwrap_or_else(|| JsValue::string(err.message.as_str()));
+        rawjs_runtime::builtins::reject_promise_with_heap(&promise_ptr, reason, &mut vm.heap);
+    }
+
+    promise_ptr
+}
+
+pub(crate) fn execute_async_top_level(vm: &mut Vm, chunk_index: usize) -> Result<JsValue> {
+    let local_count = vm.chunks[chunk_index].local_count as usize;
+    let locals = vec![JsValue::Undefined; local_count];
+    let promise_ptr = start_async_chunk(
+        vm,
+        chunk_index,
+        locals,
+        Vec::new(),
+        Vec::new(),
+        JsValue::Undefined,
+    );
+
+    drain_microtasks(vm)?;
+
+    let (status, value) = {
+        let promise = promise_ptr.borrow();
+        match &promise.internal {
+            ObjectInternal::Promise(state) => (state.status.clone(), state.value.clone()),
+            _ => {
+                return Err(RawJsError::internal_error(
+                    "async top-level execution did not produce a Promise",
+                ));
+            }
+        }
+    };
+
+    match status {
+        PromiseStatus::Fulfilled => Ok(value),
+        PromiseStatus::Rejected => Err(RawJsError::internal_error(format!(
+            "top-level await rejected: {}",
+            value
+        ))),
+        PromiseStatus::Pending => Err(RawJsError::internal_error("top-level await did not settle")),
+    }
+}
 
 /// Create and execute an async function call.
 ///
@@ -2818,12 +2819,6 @@ fn exec_async_call(
     upvalues: Vec<Upvalue>,
     this_value: JsValue,
 ) -> Result<()> {
-    // Create the result promise that the caller will receive.
-    let promise_ptr = vm.heap.alloc(JsObject::promise());
-    if let Some(ref proto) = vm.promise_prototype {
-        promise_ptr.borrow_mut().prototype = Some(proto.clone());
-    }
-
     // Set up locals with arguments.
     let param_count = vm.chunks[chunk_index].param_count as usize;
     let local_count = vm.chunks[chunk_index].local_count as usize;
@@ -2834,41 +2829,14 @@ fn exec_async_call(
             locals[i] = arg.clone();
         }
     }
-
-    // Create an internal generator state for the async function.
-    // We store the result_promise so that exec_await and Return can
-    // resolve/reject it.
-    let state = GeneratorState {
-        status: GeneratorStatus::SuspendedStart,
+    let promise_ptr = start_async_chunk(
+        vm,
         chunk_index,
-        ip: 0,
         locals,
-        arguments: args.to_vec(),
+        args.to_vec(),
         upvalues,
-        saved_stack: Vec::new(),
         this_value,
-        result_promise: Some(promise_ptr.clone()),
-        saved_try_stack: Vec::new(),
-    };
-
-    let mut gen_obj = JsObject::ordinary();
-    gen_obj.internal = ObjectInternal::Generator(state);
-    let gen_ptr = vm.heap.alloc(gen_obj);
-
-    // Run the async function body synchronously until it hits Await or returns.
-    let run_result = async_resume(vm, &gen_ptr, JsValue::Undefined, false);
-
-    match run_result {
-        Ok(()) => {} // The async function suspended or completed.
-        Err(err) => {
-            // The async function threw before first await — reject the promise.
-            let reason = vm
-                .thrown_value
-                .take()
-                .unwrap_or_else(|| JsValue::string(err.message.as_str()));
-            rawjs_runtime::builtins::reject_promise_with_heap(&promise_ptr, reason, &mut vm.heap);
-        }
-    }
+    );
 
     vm.push(JsValue::Object(promise_ptr));
     Ok(())
@@ -3045,11 +3013,11 @@ fn run_async_frame(
         let frame_idx = vm.call_stack.len() - 1;
         let chunk_index = vm.call_stack[frame_idx].chunk_index;
         let ip = vm.call_stack[frame_idx].ip;
-        let is_target_frame = vm.call_stack.len() == target_depth + 1;
+        let is_async_frame = vm.call_stack.len() == target_depth + 1;
 
         let instr_count = vm.chunks[chunk_index].instructions.len();
         if ip >= instr_count {
-            if !is_target_frame {
+            if !is_async_frame {
                 let implicit_return = finish_frame_return(vm, JsValue::Undefined);
                 vm.push(implicit_return);
                 continue;
@@ -3086,19 +3054,17 @@ fn run_async_frame(
 
         match instruction {
             Instruction::Return => {
-                if !is_target_frame {
+                if !is_async_frame {
                     match execute_instruction(vm, instruction) {
-                        Ok(Some(value)) => {
-                            vm.push(value);
-                        }
-                        Ok(None) => {}
+                        Ok(Some(_value)) => return Ok(()),
+                        Ok(None) => continue,
                         Err(err) => {
                             if !unwind_exception(vm, &err)? {
                                 return Err(err);
                             }
+                            continue;
                         }
                     }
-                    continue;
                 }
                 // Async return: resolve the result promise.
                 let return_value = if vm.value_stack.len() > vm.call_stack.last().unwrap().base {
@@ -3135,82 +3101,30 @@ fn run_async_frame(
                 return Ok(());
             }
             Instruction::Await => {
-                // Save the frame state and schedule resumption.
+                if !is_async_frame {
+                    return Err(RawJsError::internal_error(
+                        "Await instruction reached outside async frame",
+                    ));
+                }
+
                 let awaited_value = vm.pop()?;
-                let frame = vm.call_stack.pop().unwrap();
-                let saved_stack: Vec<JsValue> = vm.value_stack.drain(frame.base..).collect();
-
-                // Save try_stack entries that belong to this async frame.
-                let saved_try_entries: Vec<_> = vm
-                    .try_stack
-                    .drain(try_stack_base..)
-                    .map(|ctx| {
-                        (
-                            ctx.catch_ip,
-                            ctx.finally_ip,
-                            ctx.stack_depth,
-                            ctx.call_depth,
-                        )
-                    })
-                    .collect();
-
-                // Save state back into the generator.
-                {
-                    let mut gen_obj = gen_ptr.borrow_mut();
-                    if let ObjectInternal::Generator(ref mut state) = gen_obj.internal {
-                        state.status = GeneratorStatus::SuspendedYield;
-                        state.ip = frame.ip; // Already past Await
-                        state.locals = frame.locals;
-                        state.upvalues = frame.upvalues;
-                        state.saved_stack = saved_stack;
-                        state.saved_try_stack = saved_try_entries;
-                    }
-                }
-
-                // If awaited_value is a Promise, register .then callbacks.
-                // If not, treat as immediately resolved.
-                let is_promise = match &awaited_value {
-                    JsValue::Object(ptr) => {
-                        matches!(ptr.borrow().internal, ObjectInternal::Promise(_))
-                    }
-                    _ => false,
-                };
-
-                if is_promise {
-                    // Create native onFulfilled/onRejected callbacks that
-                    // enqueue microtasks to resume the async function.
-                    let gen_ptr_clone = gen_ptr.clone();
-                    let on_fulfilled = create_async_resume_fn(
-                        vm,
-                        gen_ptr_clone.clone(),
-                        false, // not throw
-                    );
-                    let on_rejected = create_async_resume_fn(
-                        vm,
-                        gen_ptr_clone,
-                        true, // throw
-                    );
-
-                    // Call promise.then(onFulfilled, onRejected)
-                    let then_args = [JsValue::Object(on_fulfilled), JsValue::Object(on_rejected)];
-                    rawjs_runtime::builtins::promise_then_internal(
-                        &mut vm.heap,
-                        &awaited_value,
-                        &then_args,
-                    )?;
-                } else {
-                    // Not a promise — resume immediately with the value.
-                    // Enqueue a microtask to resume.
-                    let gen_ptr_clone = gen_ptr.clone();
-                    let on_fulfilled = create_async_resume_fn(vm, gen_ptr_clone, false);
-                    vm.heap.pending_microtasks.push(rawjs_runtime::MicroTask {
-                        callback: JsValue::Object(on_fulfilled),
-                        arg: awaited_value,
-                        target_promise: None,
-                    });
-                }
-
+                suspend_async_frame(vm, gen_ptr, try_stack_base, awaited_value)?;
                 return Ok(());
+            }
+            Instruction::AsyncDisposeResource(slot) => {
+                if !is_async_frame {
+                    return Err(RawJsError::internal_error(
+                        "AsyncDisposeResource instruction reached outside async frame",
+                    ));
+                }
+
+                match prepare_dispose_resource(vm, slot, true)? {
+                    DisposeResult::Complete => continue,
+                    DisposeResult::Await(awaited_value) => {
+                        suspend_async_frame(vm, gen_ptr, try_stack_base, awaited_value)?;
+                        return Ok(());
+                    }
+                }
             }
             _ => {
                 // Normal instruction dispatch.
@@ -3229,6 +3143,64 @@ fn run_async_frame(
             }
         }
     }
+}
+
+fn suspend_async_frame(
+    vm: &mut Vm,
+    gen_ptr: &rawjs_runtime::GcPtr<JsObject>,
+    try_stack_base: usize,
+    awaited_value: JsValue,
+) -> Result<()> {
+    let frame = vm.call_stack.pop().unwrap();
+    let saved_stack: Vec<JsValue> = vm.value_stack.drain(frame.base..).collect();
+
+    let saved_try_entries: Vec<_> = vm
+        .try_stack
+        .drain(try_stack_base..)
+        .map(|ctx| {
+            (
+                ctx.catch_ip,
+                ctx.finally_ip,
+                ctx.stack_depth,
+                ctx.call_depth,
+            )
+        })
+        .collect();
+
+    {
+        let mut gen_obj = gen_ptr.borrow_mut();
+        if let ObjectInternal::Generator(ref mut state) = gen_obj.internal {
+            state.status = GeneratorStatus::SuspendedYield;
+            state.ip = frame.ip;
+            state.locals = frame.locals;
+            state.upvalues = frame.upvalues;
+            state.saved_stack = saved_stack;
+            state.saved_try_stack = saved_try_entries;
+        }
+    }
+
+    let is_promise = match &awaited_value {
+        JsValue::Object(ptr) => matches!(ptr.borrow().internal, ObjectInternal::Promise(_)),
+        _ => false,
+    };
+
+    if is_promise {
+        let gen_ptr_clone = gen_ptr.clone();
+        let on_fulfilled = create_async_resume_fn(vm, gen_ptr_clone.clone(), false);
+        let on_rejected = create_async_resume_fn(vm, gen_ptr_clone, true);
+        let then_args = [JsValue::Object(on_fulfilled), JsValue::Object(on_rejected)];
+        rawjs_runtime::builtins::promise_then_internal(&mut vm.heap, &awaited_value, &then_args)?;
+        return Ok(());
+    }
+
+    let gen_ptr_clone = gen_ptr.clone();
+    let on_fulfilled = create_async_resume_fn(vm, gen_ptr_clone, false);
+    vm.heap.pending_microtasks.push(rawjs_runtime::MicroTask {
+        callback: JsValue::Object(on_fulfilled),
+        arg: awaited_value,
+        target_promise: None,
+    });
+    Ok(())
 }
 
 /// Create a native function that, when called, resumes the async generator.
@@ -3256,46 +3228,85 @@ fn create_async_resume_fn(
     vm.heap.alloc(fn_obj)
 }
 
-/// Execute an `Await` instruction.
-///
 /// Dispose a resource stored in a local slot by calling its [Symbol.dispose]() method.
 /// If the local is null or undefined, this is a no-op.
 pub(crate) fn exec_dispose_resource(vm: &mut Vm, slot: u16) -> Result<()> {
+    match prepare_dispose_resource(vm, slot, false)? {
+        DisposeResult::Complete => Ok(()),
+        DisposeResult::Await(_) => Err(RawJsError::internal_error(
+            "DisposeResource unexpectedly required awaiting",
+        )),
+    }
+}
+
+fn prepare_dispose_resource(vm: &mut Vm, slot: u16, prefer_async: bool) -> Result<DisposeResult> {
     let frame = vm
         .call_stack
         .last()
         .ok_or_else(|| RawJsError::internal_error("DisposeResource: no call frame"))?;
     let resource = frame.locals[slot as usize].clone();
 
-    // null/undefined -> no-op
-    if resource.is_null() || resource.is_undefined() {
-        return Ok(());
+    if resource.is_nullish() {
+        return Ok(DisposeResult::Complete);
     }
 
-    // Look up [Symbol.dispose] on the resource.
-    let dispose_fn = match &resource {
-        JsValue::Object(ptr) => ptr
-            .borrow()
-            .get_symbol_property(rawjs_runtime::value::SYMBOL_DISPOSE),
-        _ => JsValue::Undefined,
+    let (dispose_fn, should_await) = lookup_dispose_method(&resource, prefer_async)?;
+    let result = call_zero_arg_method(vm, dispose_fn, resource)?;
+    if should_await {
+        return Ok(DisposeResult::Await(result));
+    }
+
+    Ok(DisposeResult::Complete)
+}
+
+fn lookup_dispose_method(resource: &JsValue, prefer_async: bool) -> Result<(JsValue, bool)> {
+    let JsValue::Object(ptr) = resource else {
+        return Err(RawJsError::type_error(
+            "Resource is not an object and cannot be disposed",
+        ));
     };
 
-    if dispose_fn.is_undefined() {
-        return Err(RawJsError::type_error(
-            "Resource does not have a [Symbol.dispose] method",
-        ));
+    let object = ptr.borrow();
+
+    if prefer_async {
+        let async_dispose = object.get_symbol_property(rawjs_runtime::value::SYMBOL_ASYNC_DISPOSE);
+        if !async_dispose.is_undefined() {
+            return Ok((async_dispose, true));
+        }
     }
 
-    // Call the dispose method with `this = resource`.
-    vm.push(dispose_fn);
-    exec_call(vm, 0, resource)?;
-
-    // Discard the return value if any.
-    if vm.value_stack.len() > vm.call_stack.last().map_or(0, |f| f.base) {
-        let _ = vm.pop()?;
+    let dispose = object.get_symbol_property(rawjs_runtime::value::SYMBOL_DISPOSE);
+    if !dispose.is_undefined() {
+        return Ok((dispose, false));
     }
 
-    Ok(())
+    let symbol_name = if prefer_async {
+        "[Symbol.asyncDispose] or [Symbol.dispose]"
+    } else {
+        "[Symbol.dispose]"
+    };
+    Err(RawJsError::type_error(format!(
+        "Resource does not have a {} method",
+        symbol_name
+    )))
+}
+
+fn call_zero_arg_method(vm: &mut Vm, callee: JsValue, this_value: JsValue) -> Result<JsValue> {
+    let base_depth = vm.call_stack.len();
+    let base_stack_len = vm.value_stack.len();
+
+    vm.push(callee);
+    exec_call(vm, 0, this_value)?;
+
+    if vm.call_stack.len() > base_depth {
+        run_inner_frame(vm, base_depth)?;
+    }
+
+    if vm.value_stack.len() <= base_stack_len {
+        return Ok(JsValue::Undefined);
+    }
+
+    vm.pop()
 }
 
 /// This is called from the normal instruction dispatch for async frames

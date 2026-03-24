@@ -117,307 +117,9 @@ impl Lexer {
         let loc = self.location();
         let had_line_break = self.had_line_break;
 
-        let ch = match self.peek_char() {
-            Some(ch) => ch,
-            None => {
-                return Ok(Token {
-                    kind: TokenKind::Eof,
-                    location: loc,
-                    had_line_break_before: had_line_break,
-                });
-            }
-        };
-
-        let kind = match ch {
-            '0'..='9' => self.read_number()?,
-            '"' | '\'' => self.read_string()?,
-            '`' => self.read_template_literal()?,
-            'a'..='z' | 'A'..='Z' | '_' | '$' => self.read_identifier_or_keyword()?,
-            ch if is_id_start(ch) => self.read_identifier_or_keyword()?,
-            '(' => {
-                self.advance();
-                TokenKind::LParen
-            }
-            ')' => {
-                self.advance();
-                TokenKind::RParen
-            }
-            '{' => {
-                self.advance();
-                if let Some(depth) = self.template_brace_stack.last_mut() {
-                    *depth += 1;
-                }
-                TokenKind::LBrace
-            }
-            '}' => {
-                if let Some(depth) = self.template_brace_stack.last_mut() {
-                    if *depth == 0 {
-                        self.template_brace_stack.pop();
-                        self.advance(); // consume }
-                        let kind = self.read_template_middle_or_tail()?;
-                        if matches!(kind, TokenKind::TemplateMiddle(_)) {
-                            self.template_brace_stack.push(0);
-                        }
-                        kind
-                    } else {
-                        *depth -= 1;
-                        self.advance();
-                        TokenKind::RBrace
-                    }
-                } else {
-                    self.advance();
-                    TokenKind::RBrace
-                }
-            }
-            '[' => {
-                self.advance();
-                TokenKind::LBracket
-            }
-            ']' => {
-                self.advance();
-                TokenKind::RBracket
-            }
-            ';' => {
-                self.advance();
-                TokenKind::Semicolon
-            }
-            ',' => {
-                self.advance();
-                TokenKind::Comma
-            }
-            ':' => {
-                self.advance();
-                TokenKind::Colon
-            }
-            '~' => {
-                self.advance();
-                TokenKind::Tilde
-            }
-            '.' => {
-                if self.peek_char_at(1) == Some('.') && self.peek_char_at(2) == Some('.') {
-                    self.advance();
-                    self.advance();
-                    self.advance();
-                    TokenKind::Ellipsis
-                } else if matches!(self.peek_char_at(1), Some('0'..='9')) {
-                    self.read_number()?
-                } else {
-                    self.advance();
-                    TokenKind::Dot
-                }
-            }
-            '?' => {
-                self.advance();
-                if self.peek_char() == Some('?') {
-                    self.advance();
-                    if self.peek_char() == Some('=') {
-                        self.advance();
-                        TokenKind::NullishCoalescingAssign
-                    } else {
-                        TokenKind::NullishCoalescing
-                    }
-                } else if self.peek_char() == Some('.') {
-                    self.advance();
-                    TokenKind::OptionalChain
-                } else {
-                    TokenKind::QuestionMark
-                }
-            }
-            '+' => {
-                self.advance();
-                match self.peek_char() {
-                    Some('+') => {
-                        self.advance();
-                        TokenKind::PlusPlus
-                    }
-                    Some('=') => {
-                        self.advance();
-                        TokenKind::PlusAssign
-                    }
-                    _ => TokenKind::Plus,
-                }
-            }
-            '-' => {
-                self.advance();
-                match self.peek_char() {
-                    Some('-') => {
-                        self.advance();
-                        TokenKind::MinusMinus
-                    }
-                    Some('=') => {
-                        self.advance();
-                        TokenKind::MinusAssign
-                    }
-                    _ => TokenKind::Minus,
-                }
-            }
-            '*' => {
-                self.advance();
-                if self.peek_char() == Some('*') {
-                    self.advance();
-                    if self.peek_char() == Some('=') {
-                        self.advance();
-                        TokenKind::StarStarAssign
-                    } else {
-                        TokenKind::StarStar
-                    }
-                } else if self.peek_char() == Some('=') {
-                    self.advance();
-                    TokenKind::StarAssign
-                } else {
-                    TokenKind::Star
-                }
-            }
-            '/' => {
-                self.advance();
-                if self.peek_char() == Some('=') {
-                    self.advance();
-                    TokenKind::SlashAssign
-                } else {
-                    TokenKind::Slash
-                }
-            }
-            '%' => {
-                self.advance();
-                if self.peek_char() == Some('=') {
-                    self.advance();
-                    TokenKind::PercentAssign
-                } else {
-                    TokenKind::Percent
-                }
-            }
-            '&' => {
-                self.advance();
-                match self.peek_char() {
-                    Some('&') => {
-                        self.advance();
-                        if self.peek_char() == Some('=') {
-                            self.advance();
-                            TokenKind::AndAssign
-                        } else {
-                            TokenKind::And
-                        }
-                    }
-                    Some('=') => {
-                        self.advance();
-                        TokenKind::AmpersandAssign
-                    }
-                    _ => TokenKind::Ampersand,
-                }
-            }
-            '|' => {
-                self.advance();
-                match self.peek_char() {
-                    Some('|') => {
-                        self.advance();
-                        if self.peek_char() == Some('=') {
-                            self.advance();
-                            TokenKind::OrAssign
-                        } else {
-                            TokenKind::Or
-                        }
-                    }
-                    Some('=') => {
-                        self.advance();
-                        TokenKind::PipeAssign
-                    }
-                    _ => TokenKind::Pipe,
-                }
-            }
-            '^' => {
-                self.advance();
-                if self.peek_char() == Some('=') {
-                    self.advance();
-                    TokenKind::CaretAssign
-                } else {
-                    TokenKind::Caret
-                }
-            }
-            '!' => {
-                self.advance();
-                if self.peek_char() == Some('=') {
-                    self.advance();
-                    if self.peek_char() == Some('=') {
-                        self.advance();
-                        TokenKind::StrictNotEqual
-                    } else {
-                        TokenKind::NotEqual
-                    }
-                } else {
-                    TokenKind::Not
-                }
-            }
-            '=' => {
-                self.advance();
-                match self.peek_char() {
-                    Some('=') => {
-                        self.advance();
-                        if self.peek_char() == Some('=') {
-                            self.advance();
-                            TokenKind::StrictEqual
-                        } else {
-                            TokenKind::Equal
-                        }
-                    }
-                    Some('>') => {
-                        self.advance();
-                        TokenKind::Arrow
-                    }
-                    _ => TokenKind::Assign,
-                }
-            }
-            '<' => {
-                self.advance();
-                match self.peek_char() {
-                    Some('<') => {
-                        self.advance();
-                        if self.peek_char() == Some('=') {
-                            self.advance();
-                            TokenKind::ShiftLeftAssign
-                        } else {
-                            TokenKind::ShiftLeft
-                        }
-                    }
-                    Some('=') => {
-                        self.advance();
-                        TokenKind::LessEqual
-                    }
-                    _ => TokenKind::LessThan,
-                }
-            }
-            '>' => {
-                self.advance();
-                match self.peek_char() {
-                    Some('>') => {
-                        self.advance();
-                        if self.peek_char() == Some('>') {
-                            self.advance();
-                            if self.peek_char() == Some('=') {
-                                self.advance();
-                                TokenKind::UnsignedShiftRightAssign
-                            } else {
-                                TokenKind::UnsignedShiftRight
-                            }
-                        } else if self.peek_char() == Some('=') {
-                            self.advance();
-                            TokenKind::ShiftRightAssign
-                        } else {
-                            TokenKind::ShiftRight
-                        }
-                    }
-                    Some('=') => {
-                        self.advance();
-                        TokenKind::GreaterEqual
-                    }
-                    _ => TokenKind::GreaterThan,
-                }
-            }
-            _ => {
-                return Err(RawJsError::syntax_error(
-                    format!("Unexpected character: '{}'", ch),
-                    Some(loc),
-                ));
-            }
+        let kind = match self.peek_char() {
+            Some(ch) => self.read_token_kind(ch, loc)?,
+            None => TokenKind::Eof,
         };
 
         Ok(Token {
@@ -425,6 +127,276 @@ impl Lexer {
             location: loc,
             had_line_break_before: had_line_break,
         })
+    }
+
+    fn read_token_kind(&mut self, ch: char, loc: SourceLocation) -> Result<TokenKind> {
+        match ch {
+            '0'..='9' => self.read_number(),
+            '"' | '\'' => self.read_string(),
+            '`' => self.read_template_literal(),
+            'a'..='z' | 'A'..='Z' | '_' | '$' => self.read_identifier_or_keyword(),
+            ch if is_id_start(ch) => self.read_identifier_or_keyword(),
+            '{' => Ok(self.read_lbrace_token()),
+            '}' => self.read_rbrace_or_template_token(),
+            '.' => self.read_dot_token(),
+            '?' => Ok(self.read_question_token()),
+            '+' => Ok(self.read_plus_token()),
+            '-' => Ok(self.read_minus_token()),
+            '*' => Ok(self.read_star_token()),
+            '/' => Ok(self.read_slash_token()),
+            '%' => Ok(self.read_percent_token()),
+            '&' => Ok(self.read_ampersand_token()),
+            '|' => Ok(self.read_pipe_token()),
+            '^' => Ok(self.read_caret_token()),
+            '!' => Ok(self.read_bang_token()),
+            '=' => Ok(self.read_equal_token()),
+            '<' => Ok(self.read_less_token()),
+            '>' => Ok(self.read_greater_token()),
+            _ => self.read_simple_punctuation(ch).ok_or_else(|| {
+                RawJsError::syntax_error(format!("Unexpected character: '{}'", ch), Some(loc))
+            }),
+        }
+    }
+
+    fn read_simple_punctuation(&mut self, ch: char) -> Option<TokenKind> {
+        let kind = match ch {
+            '(' => TokenKind::LParen,
+            ')' => TokenKind::RParen,
+            '[' => TokenKind::LBracket,
+            ']' => TokenKind::RBracket,
+            ';' => TokenKind::Semicolon,
+            ',' => TokenKind::Comma,
+            ':' => TokenKind::Colon,
+            '~' => TokenKind::Tilde,
+            _ => return None,
+        };
+        self.advance();
+        Some(kind)
+    }
+
+    fn consume_if(&mut self, expected: char) -> bool {
+        if self.peek_char() == Some(expected) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_lbrace_token(&mut self) -> TokenKind {
+        self.advance();
+        if let Some(depth) = self.template_brace_stack.last_mut() {
+            *depth += 1;
+        }
+        TokenKind::LBrace
+    }
+
+    fn read_rbrace_or_template_token(&mut self) -> Result<TokenKind> {
+        if let Some(depth) = self.template_brace_stack.last_mut() {
+            if *depth == 0 {
+                self.template_brace_stack.pop();
+                self.advance();
+                let kind = self.read_template_middle_or_tail()?;
+                if matches!(kind, TokenKind::TemplateMiddle(_)) {
+                    self.template_brace_stack.push(0);
+                }
+                Ok(kind)
+            } else {
+                *depth -= 1;
+                self.advance();
+                Ok(TokenKind::RBrace)
+            }
+        } else {
+            self.advance();
+            Ok(TokenKind::RBrace)
+        }
+    }
+
+    fn read_dot_token(&mut self) -> Result<TokenKind> {
+        if self.peek_char_at(1) == Some('.') && self.peek_char_at(2) == Some('.') {
+            self.advance();
+            self.advance();
+            self.advance();
+            Ok(TokenKind::Ellipsis)
+        } else if matches!(self.peek_char_at(1), Some('0'..='9')) {
+            self.read_number()
+        } else {
+            self.advance();
+            Ok(TokenKind::Dot)
+        }
+    }
+
+    fn read_question_token(&mut self) -> TokenKind {
+        self.advance();
+        if self.consume_if('?') {
+            if self.consume_if('=') {
+                TokenKind::NullishCoalescingAssign
+            } else {
+                TokenKind::NullishCoalescing
+            }
+        } else if self.consume_if('.') {
+            TokenKind::OptionalChain
+        } else {
+            TokenKind::QuestionMark
+        }
+    }
+
+    fn read_plus_token(&mut self) -> TokenKind {
+        self.advance();
+        if self.consume_if('+') {
+            TokenKind::PlusPlus
+        } else if self.consume_if('=') {
+            TokenKind::PlusAssign
+        } else {
+            TokenKind::Plus
+        }
+    }
+
+    fn read_minus_token(&mut self) -> TokenKind {
+        self.advance();
+        if self.consume_if('-') {
+            TokenKind::MinusMinus
+        } else if self.consume_if('=') {
+            TokenKind::MinusAssign
+        } else {
+            TokenKind::Minus
+        }
+    }
+
+    fn read_star_token(&mut self) -> TokenKind {
+        self.advance();
+        if self.consume_if('*') {
+            if self.consume_if('=') {
+                TokenKind::StarStarAssign
+            } else {
+                TokenKind::StarStar
+            }
+        } else if self.consume_if('=') {
+            TokenKind::StarAssign
+        } else {
+            TokenKind::Star
+        }
+    }
+
+    fn read_slash_token(&mut self) -> TokenKind {
+        self.advance();
+        if self.consume_if('=') {
+            TokenKind::SlashAssign
+        } else {
+            TokenKind::Slash
+        }
+    }
+
+    fn read_percent_token(&mut self) -> TokenKind {
+        self.advance();
+        if self.consume_if('=') {
+            TokenKind::PercentAssign
+        } else {
+            TokenKind::Percent
+        }
+    }
+
+    fn read_ampersand_token(&mut self) -> TokenKind {
+        self.advance();
+        if self.consume_if('&') {
+            if self.consume_if('=') {
+                TokenKind::AndAssign
+            } else {
+                TokenKind::And
+            }
+        } else if self.consume_if('=') {
+            TokenKind::AmpersandAssign
+        } else {
+            TokenKind::Ampersand
+        }
+    }
+
+    fn read_pipe_token(&mut self) -> TokenKind {
+        self.advance();
+        if self.consume_if('|') {
+            if self.consume_if('=') {
+                TokenKind::OrAssign
+            } else {
+                TokenKind::Or
+            }
+        } else if self.consume_if('=') {
+            TokenKind::PipeAssign
+        } else {
+            TokenKind::Pipe
+        }
+    }
+
+    fn read_caret_token(&mut self) -> TokenKind {
+        self.advance();
+        if self.consume_if('=') {
+            TokenKind::CaretAssign
+        } else {
+            TokenKind::Caret
+        }
+    }
+
+    fn read_bang_token(&mut self) -> TokenKind {
+        self.advance();
+        if self.consume_if('=') {
+            if self.consume_if('=') {
+                TokenKind::StrictNotEqual
+            } else {
+                TokenKind::NotEqual
+            }
+        } else {
+            TokenKind::Not
+        }
+    }
+
+    fn read_equal_token(&mut self) -> TokenKind {
+        self.advance();
+        if self.consume_if('=') {
+            if self.consume_if('=') {
+                TokenKind::StrictEqual
+            } else {
+                TokenKind::Equal
+            }
+        } else if self.consume_if('>') {
+            TokenKind::Arrow
+        } else {
+            TokenKind::Assign
+        }
+    }
+
+    fn read_less_token(&mut self) -> TokenKind {
+        self.advance();
+        if self.consume_if('<') {
+            if self.consume_if('=') {
+                TokenKind::ShiftLeftAssign
+            } else {
+                TokenKind::ShiftLeft
+            }
+        } else if self.consume_if('=') {
+            TokenKind::LessEqual
+        } else {
+            TokenKind::LessThan
+        }
+    }
+
+    fn read_greater_token(&mut self) -> TokenKind {
+        self.advance();
+        if self.consume_if('>') {
+            if self.consume_if('>') {
+                if self.consume_if('=') {
+                    TokenKind::UnsignedShiftRightAssign
+                } else {
+                    TokenKind::UnsignedShiftRight
+                }
+            } else if self.consume_if('=') {
+                TokenKind::ShiftRightAssign
+            } else {
+                TokenKind::ShiftRight
+            }
+        } else if self.consume_if('=') {
+            TokenKind::GreaterEqual
+        } else {
+            TokenKind::GreaterThan
+        }
     }
 
     fn read_number(&mut self) -> Result<TokenKind> {

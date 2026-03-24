@@ -112,6 +112,10 @@ impl Compiler {
     /// Compile a parsed program into a top-level bytecode chunk.
     pub fn compile_program(program: &Program) -> Result<Chunk> {
         let mut compiler = Compiler::new("<script>");
+        // Compile top-level programs as async chunks so `await` can be used
+        // directly in scripts and modules.
+        compiler.is_async = true;
+        compiler.chunk.is_async = true;
         compiler.is_strict = has_use_strict_directive(&program.body);
         compiler.chunk.is_strict = compiler.is_strict;
 
@@ -197,7 +201,12 @@ impl Compiler {
     pub(crate) fn end_scope(&mut self) {
         // Emit DisposeResource instructions for any `using` bindings in this scope (LIFO order).
         if let Some(dispose_slots) = self.dispose_scopes.pop() {
-            for &(slot, _is_await) in dispose_slots.iter().rev() {
+            for &(slot, is_await) in dispose_slots.iter().rev() {
+                if is_await {
+                    self.chunk.emit(Instruction::AsyncDisposeResource(slot));
+                    continue;
+                }
+
                 self.chunk.emit(Instruction::DisposeResource(slot));
             }
         }

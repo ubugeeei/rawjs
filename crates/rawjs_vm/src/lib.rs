@@ -4,6 +4,7 @@
 //! - A bytecode **interpreter** that executes `Chunk` programs from `rawjs_bytecode`.
 //! - An aarch64 **JIT compiler** (macOS Apple Silicon) that compiles hot functions
 //!   to native machine code.
+//! - Matching `x86_64` and `riscv64` baseline JIT backends built around the same stub-call model.
 
 pub mod interpreter;
 pub mod jit;
@@ -81,7 +82,7 @@ pub(crate) struct TryContext {
 /// Owns the heap, all compiled chunks, and execution state (value stack,
 /// call stack, try stack).  The VM can execute bytecode through its
 /// interpreter and will automatically JIT-compile hot functions on
-/// aarch64-apple-darwin.
+/// supported `aarch64`, `x86_64`, and `riscv64` targets.
 pub struct Vm {
     /// The garbage-collected heap for object allocations.
     pub heap: Heap,
@@ -135,6 +136,8 @@ pub struct Vm {
     module_cache: HashMap<String, GcPtr<JsObject>>,
     /// Directory of the currently executing file (for relative path resolution).
     pub current_file_dir: Option<String>,
+    /// Canonical path of the currently executing module.
+    pub current_file_path: Option<String>,
     /// The exports object for the currently executing module (if any).
     pub(crate) module_exports: Option<GcPtr<JsObject>>,
 }
@@ -172,6 +175,7 @@ impl Vm {
             generator_prototype: None,
             module_cache: HashMap::new(),
             current_file_dir: None,
+            current_file_path: None,
             module_exports: None,
         };
         vm.init_globals();
@@ -180,9 +184,19 @@ impl Vm {
 
     /// Register built-in global bindings.
     fn init_globals(&mut self) {
+        let obj_proto = self.init_core_globals();
+        let function_proto = self.init_function_and_object_globals(&obj_proto);
+        self.init_host_globals(&obj_proto);
+        self.init_primitive_constructor_globals(&obj_proto, &function_proto);
+        self.init_collection_and_symbol_globals(&obj_proto, &function_proto);
+        self.init_misc_globals(&obj_proto, &function_proto);
+        self.init_global_object(obj_proto);
+        self.repair_builtin_function_prototypes();
+    }
+
+    fn init_core_globals(&mut self) -> GcPtr<JsObject> {
         use rawjs_runtime::builtins;
 
-        // Primitive globals
         self.globals
             .insert("undefined".to_string(), JsValue::Undefined);
         self.globals
@@ -190,14 +204,21 @@ impl Vm {
         self.globals
             .insert("Infinity".to_string(), JsValue::Number(f64::INFINITY));
 
-        // Object.prototype and Object constructor
         let obj_proto = builtins::create_object_prototype(&mut self.heap);
         self.object_prototype = Some(obj_proto.clone());
+        obj_proto
+    }
 
-        // Function constructor + prototype
+    fn init_function_and_object_globals(
+        &mut self,
+        obj_proto: &GcPtr<JsObject>,
+    ) -> GcPtr<JsObject> {
+        use rawjs_runtime::builtins;
+
         let function_proto = builtins::create_function_prototype(&mut self.heap);
         function_proto.borrow_mut().prototype = Some(obj_proto.clone());
         self.function_prototype = Some(function_proto.clone());
+
         let function_ctor = self.heap.alloc(JsObject::native_function(
             "Function",
             builtins::function_constructor_placeholder,
@@ -233,19 +254,35 @@ impl Vm {
         self.globals
             .insert("Object".to_string(), JsValue::Object(object_ctor));
 
-        // console object
+        function_proto
+    }
+
+    fn init_host_globals(&mut self, obj_proto: &GcPtr<JsObject>) {
+        use rawjs_runtime::builtins;
+
         let console_ptr = builtins::create_console_object(&mut self.heap);
         console_ptr.borrow_mut().prototype = Some(obj_proto.clone());
         self.globals
             .insert("console".to_string(), JsValue::Object(console_ptr));
 
-        // Math object
         let math_ptr = builtins::create_math_object(&mut self.heap);
         math_ptr.borrow_mut().prototype = Some(obj_proto.clone());
         self.globals
             .insert("Math".to_string(), JsValue::Object(math_ptr));
 
-        // Array constructor + prototype
+        let json_ptr = builtins::create_json_object(&mut self.heap);
+        json_ptr.borrow_mut().prototype = Some(obj_proto.clone());
+        self.globals
+            .insert("JSON".to_string(), JsValue::Object(json_ptr));
+    }
+
+    fn init_primitive_constructor_globals(
+        &mut self,
+        obj_proto: &GcPtr<JsObject>,
+        function_proto: &GcPtr<JsObject>,
+    ) {
+        use rawjs_runtime::builtins;
+
         let array_proto = builtins::create_array_prototype(&mut self.heap);
         array_proto.borrow_mut().prototype = Some(obj_proto.clone());
         self.array_prototype = Some(array_proto);
@@ -272,7 +309,18 @@ impl Vm {
         self.globals
             .insert("Array".to_string(), JsValue::Object(array_ctor));
 
-        // String.prototype
+        self.init_string_global(obj_proto, function_proto);
+        self.init_boolean_global(obj_proto, function_proto);
+        self.init_number_global(obj_proto, function_proto);
+    }
+
+    fn init_string_global(
+        &mut self,
+        obj_proto: &GcPtr<JsObject>,
+        function_proto: &GcPtr<JsObject>,
+    ) {
+        use rawjs_runtime::builtins;
+
         let string_proto = builtins::create_string_prototype(&mut self.heap);
         string_proto.borrow_mut().prototype = Some(obj_proto.clone());
         self.string_prototype = Some(string_proto);
@@ -300,8 +348,15 @@ impl Vm {
             );
         self.globals
             .insert("String".to_string(), JsValue::Object(string_ctor));
+    }
 
-        // Boolean.prototype
+    fn init_boolean_global(
+        &mut self,
+        obj_proto: &GcPtr<JsObject>,
+        function_proto: &GcPtr<JsObject>,
+    ) {
+        use rawjs_runtime::builtins;
+
         let boolean_proto = builtins::create_boolean_prototype(&mut self.heap);
         boolean_proto.borrow_mut().prototype = Some(obj_proto.clone());
         self.boolean_prototype = Some(boolean_proto);
@@ -329,8 +384,15 @@ impl Vm {
             );
         self.globals
             .insert("Boolean".to_string(), JsValue::Object(boolean_ctor));
+    }
 
-        // Number.prototype
+    fn init_number_global(
+        &mut self,
+        obj_proto: &GcPtr<JsObject>,
+        function_proto: &GcPtr<JsObject>,
+    ) {
+        use rawjs_runtime::builtins;
+
         let number_proto = builtins::create_number_prototype(&mut self.heap);
         number_proto.borrow_mut().prototype = Some(obj_proto.clone());
         self.number_prototype = Some(number_proto);
@@ -378,140 +440,116 @@ impl Vm {
             );
         self.globals
             .insert("Number".to_string(), JsValue::Object(number_ctor));
+    }
 
-        // Symbol constructor (a callable function with static properties)
+    fn init_collection_and_symbol_globals(
+        &mut self,
+        obj_proto: &GcPtr<JsObject>,
+        function_proto: &GcPtr<JsObject>,
+    ) {
+        use rawjs_runtime::builtins;
+
         let mut symbol_fn = JsObject::native_function("Symbol", builtins::symbol_call);
-        // Add static methods and well-known symbols
-        {
-            let symbol_obj = builtins::create_symbol_constructor(&mut self.heap);
-            let borrowed = symbol_obj.borrow();
-            for (key, prop) in borrowed.properties.iter() {
-                symbol_fn.define_property(key.clone(), prop.clone());
-            }
+        let symbol_obj = builtins::create_symbol_constructor(&mut self.heap);
+        for (key, prop) in symbol_obj.borrow().properties.iter() {
+            symbol_fn.define_property(key.clone(), prop.clone());
         }
         let symbol_ptr = self.heap.alloc(symbol_fn);
         symbol_ptr.borrow_mut().prototype = Some(function_proto.clone());
         self.globals
-            .insert("Symbol".to_string(), JsValue::Object(symbol_ptr));
+            .insert("Symbol".to_string(), JsValue::Object(symbol_ptr.clone()));
 
-        // Symbol.prototype
         let symbol_proto = builtins::create_symbol_prototype(&mut self.heap);
         symbol_proto.borrow_mut().prototype = Some(obj_proto.clone());
-        if let Some(JsValue::Object(symbol_ctor)) = self.globals.get("Symbol") {
-            symbol_ctor.borrow_mut().define_property(
-                "prototype".to_string(),
-                rawjs_runtime::Property::builtin(JsValue::Object(symbol_proto.clone())),
-            );
-        }
+        symbol_ptr.borrow_mut().define_property(
+            "prototype".to_string(),
+            rawjs_runtime::Property::builtin(JsValue::Object(symbol_proto.clone())),
+        );
         self.symbol_prototype = Some(symbol_proto);
 
-        // Map constructor + prototype
         let map_proto = builtins::create_map_prototype(&mut self.heap);
         map_proto.borrow_mut().prototype = Some(obj_proto.clone());
         self.map_prototype = Some(map_proto);
         let map_ctor = self
             .heap
             .alloc(JsObject::native_function("Map", builtins::map_constructor));
-        {
-            let mut ctor = map_ctor.borrow_mut();
-            ctor.prototype = Some(function_proto.clone());
-            ctor.define_property(
-                "prototype".to_string(),
-                rawjs_runtime::Property::builtin(JsValue::Object(
-                    self.map_prototype.as_ref().unwrap().clone(),
-                )),
-            );
-        }
-        self.globals
-            .insert("Map".to_string(), JsValue::Object(map_ctor));
+        map_ctor.borrow_mut().prototype = Some(function_proto.clone());
+        map_ctor.borrow_mut().define_property(
+            "prototype".to_string(),
+            rawjs_runtime::Property::builtin(JsValue::Object(
+                self.map_prototype.as_ref().unwrap().clone(),
+            )),
+        );
+        self.globals.insert("Map".to_string(), JsValue::Object(map_ctor));
 
-        // Set constructor + prototype
         let set_proto = builtins::create_set_prototype(&mut self.heap);
         set_proto.borrow_mut().prototype = Some(obj_proto.clone());
         self.set_prototype = Some(set_proto);
         let set_ctor = self
             .heap
             .alloc(JsObject::native_function("Set", builtins::set_constructor));
-        {
-            let mut ctor = set_ctor.borrow_mut();
-            ctor.prototype = Some(function_proto.clone());
-            ctor.define_property(
-                "prototype".to_string(),
-                rawjs_runtime::Property::builtin(JsValue::Object(
-                    self.set_prototype.as_ref().unwrap().clone(),
-                )),
-            );
-        }
-        self.globals
-            .insert("Set".to_string(), JsValue::Object(set_ctor));
+        set_ctor.borrow_mut().prototype = Some(function_proto.clone());
+        set_ctor.borrow_mut().define_property(
+            "prototype".to_string(),
+            rawjs_runtime::Property::builtin(JsValue::Object(
+                self.set_prototype.as_ref().unwrap().clone(),
+            )),
+        );
+        self.globals.insert("Set".to_string(), JsValue::Object(set_ctor));
+    }
 
-        // Promise constructor + prototype
+    fn init_misc_globals(
+        &mut self,
+        obj_proto: &GcPtr<JsObject>,
+        function_proto: &GcPtr<JsObject>,
+    ) {
+        use rawjs_runtime::builtins;
+
         let promise_proto = builtins::create_promise_prototype(&mut self.heap);
         promise_proto.borrow_mut().prototype = Some(obj_proto.clone());
         self.promise_prototype = Some(promise_proto);
         let mut promise_ctor =
             JsObject::native_function("Promise", builtins::promise_constructor_placeholder);
-        // Static methods: Promise.resolve, Promise.reject
-        {
-            let resolve_fn = JsObject::native_function("resolve", builtins::promise_resolve_static);
-            promise_ctor.define_property(
-                "resolve".to_string(),
-                rawjs_runtime::Property::builtin(JsValue::Object(self.heap.alloc(resolve_fn))),
-            );
-            let reject_fn = JsObject::native_function("reject", builtins::promise_reject_static);
-            promise_ctor.define_property(
-                "reject".to_string(),
-                rawjs_runtime::Property::builtin(JsValue::Object(self.heap.alloc(reject_fn))),
-            );
-        }
+        let resolve_fn = JsObject::native_function("resolve", builtins::promise_resolve_static);
+        promise_ctor.define_property(
+            "resolve".to_string(),
+            rawjs_runtime::Property::builtin(JsValue::Object(self.heap.alloc(resolve_fn))),
+        );
+        let reject_fn = JsObject::native_function("reject", builtins::promise_reject_static);
+        promise_ctor.define_property(
+            "reject".to_string(),
+            rawjs_runtime::Property::builtin(JsValue::Object(self.heap.alloc(reject_fn))),
+        );
         let promise_ctor_ptr = self.heap.alloc(promise_ctor);
-        {
-            let mut ctor = promise_ctor_ptr.borrow_mut();
-            ctor.prototype = Some(function_proto.clone());
-            ctor.define_property(
-                "prototype".to_string(),
-                rawjs_runtime::Property::builtin(JsValue::Object(
-                    self.promise_prototype.as_ref().unwrap().clone(),
-                )),
-            );
-        }
+        promise_ctor_ptr.borrow_mut().prototype = Some(function_proto.clone());
+        promise_ctor_ptr.borrow_mut().define_property(
+            "prototype".to_string(),
+            rawjs_runtime::Property::builtin(JsValue::Object(
+                self.promise_prototype.as_ref().unwrap().clone(),
+            )),
+        );
         self.globals
             .insert("Promise".to_string(), JsValue::Object(promise_ctor_ptr));
 
-        // Generator.prototype with next/return/throw
-        let gen_proto =
-            rawjs_runtime::builtins::generator::create_generator_prototype(&mut self.heap);
+        let gen_proto = rawjs_runtime::builtins::generator::create_generator_prototype(
+            &mut self.heap,
+        );
         gen_proto.borrow_mut().prototype = Some(obj_proto.clone());
         self.generator_prototype = Some(gen_proto);
 
-        // JSON object
-        let json_ptr = builtins::create_json_object(&mut self.heap);
-        json_ptr.borrow_mut().prototype = Some(obj_proto.clone());
-        self.globals
-            .insert("JSON".to_string(), JsValue::Object(json_ptr));
-
-        // Error constructors
-        for name in &[
-            "Error",
-            "TypeError",
-            "ReferenceError",
-            "SyntaxError",
-            "RangeError",
-        ] {
+        for name in &["Error", "TypeError", "ReferenceError", "SyntaxError", "RangeError"] {
             let ctor = builtins::create_error_constructor(&mut self.heap, name);
             ctor.borrow_mut().prototype = Some(function_proto.clone());
             self.globals.insert(name.to_string(), JsValue::Object(ctor));
         }
 
-        // Global functions (parseInt, parseFloat, isNaN, isFinite, encodeURIComponent, etc.)
-        let global_fns = builtins::create_global_functions(&mut self.heap);
-        for (name, func_ptr) in global_fns {
+        for (name, func_ptr) in builtins::create_global_functions(&mut self.heap) {
             func_ptr.borrow_mut().prototype = Some(function_proto.clone());
-            self.globals
-                .insert(name.to_string(), JsValue::Object(func_ptr));
+            self.globals.insert(name.to_string(), JsValue::Object(func_ptr));
         }
+    }
 
-        // Keep Object.prototype ref for prototype chain lookups
+    fn init_global_object(&mut self, obj_proto: GcPtr<JsObject>) {
         self.globals.insert(
             "__object_prototype__".to_string(),
             JsValue::Object(obj_proto),
@@ -529,7 +567,6 @@ impl Vm {
             JsValue::Object(global_obj.clone()),
         );
         self.global_object = Some(global_obj);
-        self.repair_builtin_function_prototypes();
     }
 
     fn repair_builtin_function_prototypes(&mut self) {
@@ -694,6 +731,9 @@ impl Vm {
     /// the final value left on the stack (or `undefined`).
     pub fn execute(&mut self, chunk: Chunk) -> Result<JsValue> {
         let chunk_index = self.add_chunk(chunk);
+        if self.chunks[chunk_index].is_async {
+            return interpreter::execute_async_top_level(self, chunk_index);
+        }
 
         let local_count = self.chunks[chunk_index].local_count as usize;
 
@@ -751,6 +791,26 @@ impl Vm {
             .as_ref()
             .map(|ptr| JsValue::Object(ptr.clone()))
             .unwrap_or(JsValue::Undefined)
+    }
+
+    pub(crate) fn create_promise_object(&mut self) -> GcPtr<JsObject> {
+        let promise_ptr = self.heap.alloc(JsObject::promise());
+        if let Some(ref proto) = self.promise_prototype {
+            promise_ptr.borrow_mut().prototype = Some(proto.clone());
+        }
+        promise_ptr
+    }
+
+    pub(crate) fn create_import_meta_object(&mut self) -> Result<GcPtr<JsObject>> {
+        let current_path = self.current_file_path.clone().ok_or_else(|| {
+            RawJsError::type_error("import.meta is only available while executing a module")
+        })?;
+
+        let meta_ptr = self.heap.alloc(JsObject::ordinary());
+        meta_ptr
+            .borrow_mut()
+            .set_property("url".to_string(), JsValue::string(current_path));
+        Ok(meta_ptr)
     }
 
     // -----------------------------------------------------------------
@@ -868,6 +928,7 @@ impl Vm {
 
         // Save parent context
         let prev_file_dir = self.current_file_dir.take();
+        let prev_file_path = self.current_file_path.take();
         let prev_exports = self.module_exports.take();
 
         // Set module context
@@ -875,35 +936,41 @@ impl Vm {
             .parent()
             .map(|p| p.to_string_lossy().to_string());
         self.current_file_dir = module_dir;
+        self.current_file_path = Some(resolved.clone());
         self.module_exports = Some(exports.clone());
 
         // --- Execute ---
         let chunk_index = self.add_chunk(chunk);
-        let local_count = self.chunks[chunk_index].local_count as usize;
+        let execution_result = if self.chunks[chunk_index].is_async {
+            interpreter::execute_async_top_level(self, chunk_index).map(|_| ())
+        } else {
+            let local_count = self.chunks[chunk_index].local_count as usize;
+            let frame = CallFrame {
+                chunk_index,
+                ip: 0,
+                base: self.value_stack.len(),
+                locals: vec![JsValue::Undefined; local_count],
+                arguments: Vec::new(),
+                arguments_object: None,
+                callee: None,
+                is_strict: self.chunks[chunk_index].is_strict,
+                upvalues: Vec::new(),
+                this_value: JsValue::Undefined,
+            };
+            self.call_stack.push(frame);
 
-        let frame = CallFrame {
-            chunk_index,
-            ip: 0,
-            base: self.value_stack.len(),
-            locals: vec![JsValue::Undefined; local_count],
-            arguments: Vec::new(),
-            arguments_object: None,
-            callee: None,
-            is_strict: self.chunks[chunk_index].is_strict,
-            upvalues: Vec::new(),
-            this_value: self.global_this_value(),
+            // Run only the module frame.  We record the call-stack depth so
+            // the interpreter stops when the module's frame returns instead
+            // of continuing into the caller's frame.
+            interpreter::run_module_frame(self)
         };
-        self.call_stack.push(frame);
-
-        // Run only the module frame.  We record the call-stack depth so
-        // the interpreter stops when the module's frame returns instead
-        // of continuing into the caller's frame.
-        interpreter::run_module_frame(self)?;
 
         // --- Restore parent context ---
         let final_exports = self.module_exports.take().unwrap_or(exports);
         self.current_file_dir = prev_file_dir;
+        self.current_file_path = prev_file_path;
         self.module_exports = prev_exports;
+        execution_result?;
 
         // --- Cache result ---
         self.module_cache.insert(resolved, final_exports.clone());
@@ -957,6 +1024,8 @@ impl Default for Vm {
 mod tests {
     use super::*;
     use rawjs_bytecode::{Chunk, Constant, Instruction};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     /// Helper: build a chunk that pushes a number constant and returns it.
     fn make_return_number(n: f64) -> Chunk {
@@ -968,11 +1037,15 @@ mod tests {
     }
 
     fn execute_source(source: &str) -> Vm {
+        execute_source_result(source).0
+    }
+
+    fn execute_source_result(source: &str) -> (Vm, JsValue) {
         let program = rawjs_parser::parse(source).unwrap();
         let chunk = rawjs_bytecode::compile(&program).unwrap();
         let mut vm = Vm::new();
-        vm.execute(chunk).unwrap();
-        vm
+        let result = vm.execute(chunk).unwrap();
+        (vm, result)
     }
 
     #[test]
@@ -1234,6 +1307,226 @@ mod tests {
 
         let result = vm.execute(chunk).unwrap();
         assert_eq!(result, JsValue::Number(42.0));
+    }
+
+    #[test]
+    fn test_execute_top_level_await() {
+        let mut vm = Vm::new();
+        let mut chunk = Chunk::new("<test>");
+        chunk.is_async = true;
+
+        let promise_name = chunk
+            .add_constant(Constant::String("Promise".to_string()))
+            .unwrap();
+        let resolve_name = chunk
+            .add_constant(Constant::String("resolve".to_string()))
+            .unwrap();
+        let value = chunk.add_constant(Constant::Number(42.0)).unwrap();
+
+        chunk.emit(Instruction::LoadGlobal(promise_name));
+        chunk.emit(Instruction::Dup);
+        chunk.emit(Instruction::GetProperty(resolve_name));
+        chunk.emit(Instruction::LoadConst(value));
+        chunk.emit(Instruction::CallMethod(1));
+        chunk.emit(Instruction::Await);
+        chunk.emit(Instruction::Return);
+
+        let result = vm.execute(chunk).unwrap();
+        assert_eq!(result, JsValue::Number(42.0));
+    }
+
+    #[test]
+    fn test_execute_module_with_top_level_await() {
+        let mut vm = Vm::new();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let module_dir = std::env::temp_dir().join(format!("rawjs-top-level-await-{}", unique));
+        let module_path = module_dir.join("dep.js");
+
+        let _ = fs::remove_dir_all(&module_dir);
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(&module_path, "export default await Promise.resolve(42);\n").unwrap();
+
+        vm.current_file_dir = Some(module_dir.to_string_lossy().to_string());
+
+        let exports = vm.execute_module("./dep.js").unwrap();
+        assert_eq!(
+            exports.borrow().get_property("default"),
+            JsValue::Number(42.0)
+        );
+
+        let _ = fs::remove_dir_all(&module_dir);
+    }
+
+    #[test]
+    fn test_execute_import_meta_url() {
+        let mut vm = Vm::new();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let module_dir = std::env::temp_dir().join(format!("rawjs-import-meta-{}", unique));
+        let module_path = module_dir.join("dep.js");
+
+        let _ = fs::remove_dir_all(&module_dir);
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(&module_path, "export default import.meta.url;\n").unwrap();
+
+        vm.current_file_dir = Some(module_dir.to_string_lossy().to_string());
+
+        let exports = vm.execute_module("./dep.js").unwrap();
+        assert_eq!(
+            exports.borrow().get_property("default"),
+            JsValue::string(module_path.canonicalize().unwrap().to_string_lossy())
+        );
+
+        let _ = fs::remove_dir_all(&module_dir);
+    }
+
+    #[test]
+    fn test_execute_dynamic_import() {
+        let mut vm = Vm::new();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let module_dir = std::env::temp_dir().join(format!("rawjs-dynamic-import-{}", unique));
+        let module_path = module_dir.join("dep.js");
+
+        let _ = fs::remove_dir_all(&module_dir);
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(&module_path, "export default 42;\n").unwrap();
+
+        vm.current_file_dir = Some(module_dir.to_string_lossy().to_string());
+
+        let program =
+            rawjs_parser::parse("name = 'dep'; out = (await import('./' + name + '.js')).default;")
+                .unwrap();
+        let chunk = rawjs_bytecode::compile(&program).unwrap();
+        vm.execute(chunk).unwrap();
+
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(42.0)));
+
+        let _ = fs::remove_dir_all(&module_dir);
+    }
+
+    #[test]
+    fn test_execute_dynamic_import_rejects_missing_module() {
+        let mut vm = Vm::new();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let module_dir =
+            std::env::temp_dir().join(format!("rawjs-dynamic-import-missing-{}", unique));
+
+        let _ = fs::remove_dir_all(&module_dir);
+        fs::create_dir_all(&module_dir).unwrap();
+
+        vm.current_file_dir = Some(module_dir.to_string_lossy().to_string());
+
+        let program = rawjs_parser::parse(
+            "out = ''; try { await import('./missing.js'); } catch (e) { out = e; }",
+        )
+        .unwrap();
+        let chunk = rawjs_bytecode::compile(&program).unwrap();
+        vm.execute(chunk).unwrap();
+
+        let out = vm.get_global("out").cloned().unwrap_or(JsValue::Undefined);
+        let out = out.to_string_value();
+        assert!(out.contains("Cannot find module './missing.js'"));
+
+        let _ = fs::remove_dir_all(&module_dir);
+    }
+
+    #[test]
+    fn test_execute_optional_member_access() {
+        let vm = execute_source("let obj = { value: 42 }; out = obj?.value;");
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(42.0)));
+    }
+
+    #[test]
+    fn test_execute_optional_member_access_on_null() {
+        let vm = execute_source("let obj = null; out = obj?.value;");
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Undefined));
+    }
+
+    #[test]
+    fn test_execute_optional_method_call_preserves_this() {
+        let vm = execute_source(
+            "let obj = { value: 42, getValue: function() { return this.value; } }; out = obj.getValue?.();",
+        );
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(42.0)));
+    }
+
+    #[test]
+    fn test_execute_optional_method_call_on_null_receiver() {
+        let vm = execute_source("let obj = null; out = obj?.getValue();");
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Undefined));
+    }
+
+    #[test]
+    fn test_execute_optional_delete_on_null_receiver() {
+        let vm = execute_source("let obj = null; out = delete obj?.value;");
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Boolean(true)));
+    }
+
+    #[test]
+    fn test_execute_using_calls_bytecode_dispose() {
+        let vm = execute_source(
+            "disposed = 0; { using r = { [Symbol.dispose]: function() { disposed = 1; } }; } out = disposed;",
+        );
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(1.0)));
+    }
+
+    #[test]
+    fn test_execute_await_using_awaits_async_dispose() {
+        let vm = execute_source(
+            "disposed = 0; { await using r = { [Symbol.asyncDispose]: async function() { await Promise.resolve(0); disposed = 1; } }; } out = disposed;",
+        );
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(1.0)));
+    }
+
+    #[test]
+    fn test_execute_await_using_sync_fallback_is_not_awaited() {
+        let vm = execute_source(
+            "disposed = 0; { await using r = { [Symbol.dispose]: async function() { await Promise.resolve(0); disposed = 1; } }; } out = disposed;",
+        );
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(0.0)));
+    }
+
+    #[test]
+    fn test_execute_logical_or_assignment() {
+        let vm = execute_source("let value = 0; out = (value ||= 42); out2 = value;");
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(42.0)));
+        assert_eq!(vm.get_global("out2"), Some(&JsValue::Number(42.0)));
+    }
+
+    #[test]
+    fn test_execute_logical_and_assignment_short_circuits() {
+        let vm = execute_source("let value = 0; out = (value &&= 42); out2 = value;");
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(0.0)));
+        assert_eq!(vm.get_global("out2"), Some(&JsValue::Number(0.0)));
+    }
+
+    #[test]
+    fn test_execute_logical_nullish_assignment() {
+        let vm = execute_source("let value = null; out = (value ??= 42); out2 = value;");
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(42.0)));
+        assert_eq!(vm.get_global("out2"), Some(&JsValue::Number(42.0)));
+    }
+
+    #[test]
+    fn test_execute_logical_assignment_member_evaluates_left_once() {
+        let vm = execute_source(
+            "objCalls = 0; keyCalls = 0; holder = { value: 0 }; function getObj() { objCalls += 1; return holder; } function getKey() { keyCalls += 1; return 'value'; } out = (getObj()[getKey()] ||= 1); out2 = objCalls; out3 = keyCalls; out4 = holder.value;",
+        );
+        assert_eq!(vm.get_global("out"), Some(&JsValue::Number(1.0)));
+        assert_eq!(vm.get_global("out2"), Some(&JsValue::Number(1.0)));
+        assert_eq!(vm.get_global("out3"), Some(&JsValue::Number(1.0)));
+        assert_eq!(vm.get_global("out4"), Some(&JsValue::Number(1.0)));
     }
 
     #[test]

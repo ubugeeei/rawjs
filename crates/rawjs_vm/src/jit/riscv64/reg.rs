@@ -1,0 +1,10 @@
+pub const ZERO: u8 = 0;
+pub const RA: u8 = 1;
+pub const SP: u8 = 2;
+pub const T0: u8 = 5;
+pub const T1: u8 = 6;
+pub const S0: u8 = 8;
+pub const S1: u8 = 9;
+pub const A0: u8 = 10;
+pub const A1: u8 = 11;
+pub const A2: u8 = 12;

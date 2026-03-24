@@ -42,7 +42,13 @@ impl Parser {
                 .parse_class_declaration()
                 .map(Statement::ClassDeclaration),
             TokenKind::With => self.parse_with_statement(),
-            TokenKind::Import => self.parse_import_declaration(),
+            TokenKind::Import => {
+                if self.is_import_expression() {
+                    self.parse_expression_statement()
+                } else {
+                    self.parse_import_declaration()
+                }
+            }
             TokenKind::Export => self.parse_export_declaration(),
             TokenKind::Async => {
                 // `async function ...` declaration
@@ -116,6 +122,17 @@ impl Parser {
             }
         }
         false
+    }
+
+    fn is_import_expression(&self) -> bool {
+        if !self.at(&TokenKind::Import) || self.pos + 1 >= self.tokens.len() {
+            return false;
+        }
+
+        matches!(
+            self.tokens[self.pos + 1].kind,
+            TokenKind::LParen | TokenKind::Dot
+        )
     }
 
     /// Check if current `using` identifier starts a `using` declaration.
