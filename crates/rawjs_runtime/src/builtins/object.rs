@@ -248,11 +248,24 @@ fn object_define_property(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -
     };
 
     let descriptor = descriptor.borrow();
-    let prop = crate::object::Property {
-        value: descriptor.get_property("value"),
-        writable: descriptor.get_property("writable").to_boolean(),
-        enumerable: descriptor.get_property("enumerable").to_boolean(),
-        configurable: descriptor.get_property("configurable").to_boolean(),
+    let getter = descriptor.get_property("get");
+    let setter = descriptor.get_property("set");
+    let prop = if !getter.is_undefined() || !setter.is_undefined() {
+        crate::object::Property::accessor(
+            (!getter.is_undefined()).then_some(getter),
+            (!setter.is_undefined()).then_some(setter),
+            descriptor.get_property("enumerable").to_boolean(),
+            descriptor.get_property("configurable").to_boolean(),
+        )
+    } else {
+        crate::object::Property {
+            value: descriptor.get_property("value"),
+            get: None,
+            set: None,
+            writable: descriptor.get_property("writable").to_boolean(),
+            enumerable: descriptor.get_property("enumerable").to_boolean(),
+            configurable: descriptor.get_property("configurable").to_boolean(),
+        }
     };
     drop(descriptor);
 

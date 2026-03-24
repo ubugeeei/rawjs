@@ -773,7 +773,7 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
                 .last()
                 .map(|frame| frame.is_strict)
                 .unwrap_or(false);
-            set_property_value(&obj_val, &name, &value, is_strict)?;
+            set_property_value(vm, &obj_val, &name, &value, is_strict)?;
             if let (JsValue::Object(ptr), Some(global_obj)) = (&obj_val, &vm.global_object) {
                 if ptr.ptr_eq(global_obj) {
                     vm.globals.insert(name.clone(), value.clone());
@@ -798,7 +798,7 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
                 .last()
                 .map(|frame| frame.is_strict)
                 .unwrap_or(false);
-            set_property_value(&obj_val, &key, &value, is_strict)?;
+            set_property_value(vm, &obj_val, &key, &value, is_strict)?;
             if let (JsValue::Object(ptr), Some(global_obj)) = (&obj_val, &vm.global_object) {
                 if ptr.ptr_eq(global_obj) {
                     vm.globals.insert(key.to_string(), value.clone());
@@ -839,7 +839,7 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
                     .last()
                     .map(|frame| frame.is_strict)
                     .unwrap_or(false);
-                set_property_value(&obj_val, &key_str, &value, is_strict)?;
+                set_property_value(vm, &obj_val, &key_str, &value, is_strict)?;
                 if let (JsValue::Object(ptr), Some(global_obj)) = (&obj_val, &vm.global_object) {
                     if ptr.ptr_eq(global_obj) {
                         vm.globals.insert(key_str.to_string(), value.clone());
@@ -1775,10 +1775,48 @@ pub(crate) fn js_add(lhs: &JsValue, rhs: &JsValue) -> JsValue {
     }
 }
 
+fn invoke_function_immediately(
+    vm: &mut Vm,
+    callee: JsValue,
+    this_value: JsValue,
+    args: &[JsValue],
+) -> Result<JsValue> {
+    let saved_stack_len = vm.value_stack.len();
+    let saved_call_depth = vm.call_stack.len();
+
+    vm.push(callee);
+    for arg in args {
+        vm.push(arg.clone());
+    }
+
+    exec_call(vm, args.len(), this_value)?;
+    if vm.call_stack.len() > saved_call_depth {
+        run_executor_frame(vm, saved_call_depth)?;
+    }
+
+    let result = if vm.value_stack.len() > saved_stack_len {
+        vm.pop()?
+    } else {
+        JsValue::Undefined
+    };
+    vm.value_stack.truncate(saved_stack_len);
+    Ok(result)
+}
+
 /// Get a property from a JsValue (must be an object).
-pub(crate) fn get_property_value(vm: &Vm, obj_val: &JsValue, name: &str) -> Result<JsValue> {
+pub(crate) fn get_property_value(vm: &mut Vm, obj_val: &JsValue, name: &str) -> Result<JsValue> {
     match obj_val {
         JsValue::Object(ptr) => {
+            if let Some(prop) = ptr.borrow().get_property_descriptor(name) {
+                if prop.is_accessor() {
+                    if let Some(getter) = prop.get {
+                        return invoke_function_immediately(vm, getter, obj_val.clone(), &[]);
+                    }
+                    return Ok(JsValue::Undefined);
+                }
+                return Ok(prop.value);
+            }
+
             let obj = ptr.borrow();
             let val = obj.get_property(name);
             if !val.is_undefined() {
@@ -1899,6 +1937,7 @@ pub(crate) fn get_property_value(vm: &Vm, obj_val: &JsValue, name: &str) -> Resu
 
 /// Set a property on a JsValue (must be an object).
 pub(crate) fn set_property_value(
+    vm: &mut Vm,
     obj_val: &JsValue,
     name: &str,
     value: &JsValue,
@@ -1906,6 +1945,37 @@ pub(crate) fn set_property_value(
 ) -> Result<()> {
     match obj_val {
         JsValue::Object(ptr) => {
+            if let Some(prop) = ptr.borrow().get_property_descriptor(name) {
+                if prop.is_accessor() {
+                    if let Some(setter) = prop.set {
+                        invoke_function_immediately(
+                            vm,
+                            setter,
+                            obj_val.clone(),
+                            std::slice::from_ref(value),
+                        )?;
+                        return Ok(());
+                    }
+                    if is_strict {
+                        return Err(RawJsError::type_error(format!(
+                            "Cannot assign to property '{}'",
+                            name
+                        )));
+                    }
+                    return Ok(());
+                }
+
+                if !prop.writable {
+                    if is_strict {
+                        return Err(RawJsError::type_error(format!(
+                            "Cannot assign to property '{}'",
+                            name
+                        )));
+                    }
+                    return Ok(());
+                }
+            }
+
             let wrote = ptr.borrow_mut().try_set_property(name.to_string(), value.clone());
             if !wrote && is_strict {
                 return Err(RawJsError::type_error(format!(

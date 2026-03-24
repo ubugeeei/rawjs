@@ -731,7 +731,7 @@ pub extern "C" fn stub_set_property(vm: *mut Vm, idx: u32) -> u32 {
         .last()
         .map(|frame| frame.is_strict)
         .unwrap_or(false);
-    match crate::interpreter::set_property_value(&obj_val, &name, &value, is_strict) {
+    match crate::interpreter::set_property_value(vm, &obj_val, &name, &value, is_strict) {
         Ok(()) => {
             vm.push(value);
             0
@@ -782,7 +782,7 @@ pub extern "C" fn stub_set_index(vm: *mut Vm) -> u32 {
         .last()
         .map(|frame| frame.is_strict)
         .unwrap_or(false);
-    match crate::interpreter::set_property_value(&obj_val, &key, &value, is_strict) {
+    match crate::interpreter::set_property_value(vm, &obj_val, &key, &value, is_strict) {
         Ok(()) => {
             vm.push(value);
             0
@@ -833,7 +833,7 @@ pub extern "C" fn stub_set_computed(vm: *mut Vm) -> u32 {
         .last()
         .map(|frame| frame.is_strict)
         .unwrap_or(false);
-    match crate::interpreter::set_property_value(&obj_val, &key_str, &value, is_strict) {
+    match crate::interpreter::set_property_value(vm, &obj_val, &key_str, &value, is_strict) {
         Ok(()) => {
             vm.push(value);
             0

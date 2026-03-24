@@ -225,6 +225,11 @@ impl Compiler {
         self.declare_local_with_storage(name, LocalStorage::GlobalAlias)
     }
 
+    pub(crate) fn declare_temp_local(&mut self, prefix: &str) -> Result<u16> {
+        let name = format!("#{}{}", prefix, self.locals.len());
+        self.declare_local(&name)
+    }
+
     fn declare_local_with_storage(&mut self, name: &str, storage: LocalStorage) -> Result<u16> {
         let index = self.locals.len();
         if index > u16::MAX as usize {

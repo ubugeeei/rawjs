@@ -940,6 +940,28 @@ mod tests {
     }
 
     #[test]
+    fn test_execute_member_postfix_increment_uses_numeric_coercion() {
+        let vm = execute_source("var __map = { foo: 'bar' }; __map.foo++;");
+        let map = vm.get_global("__map").unwrap().clone();
+        let JsValue::Object(obj) = map else {
+            panic!("expected object");
+        };
+        let value = obj.borrow().get_property("foo");
+        match value {
+            JsValue::Number(n) => assert!(n.is_nan()),
+            other => panic!("expected NaN number, got {other}"),
+        }
+    }
+
+    #[test]
+    fn test_execute_accessor_property_setter() {
+        let vm = execute_source(
+            "var o = {}; var v = 1; Object.defineProperty(o, 'b', { get: function () { return v; }, set: function (value) { v = value; } }); o.b = 11;",
+        );
+        assert_eq!(vm.get_global("v"), Some(&JsValue::Number(11.0)));
+    }
+
+    #[test]
     fn test_execute_typeof() {
         let mut vm = Vm::new();
         let mut chunk = Chunk::new("<test>");

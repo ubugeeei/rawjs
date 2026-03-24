@@ -69,6 +69,8 @@ impl From<u32> for PropertyKey {
 #[derive(Debug, Clone)]
 pub struct Property {
     pub value: JsValue,
+    pub get: Option<JsValue>,
+    pub set: Option<JsValue>,
     pub writable: bool,
     pub enumerable: bool,
     pub configurable: bool,
@@ -79,6 +81,8 @@ impl Property {
     pub fn data(value: JsValue) -> Self {
         Property {
             value,
+            get: None,
+            set: None,
             writable: true,
             enumerable: true,
             configurable: true,
@@ -89,6 +93,8 @@ impl Property {
     pub fn builtin(value: JsValue) -> Self {
         Property {
             value,
+            get: None,
+            set: None,
             writable: true,
             enumerable: false,
             configurable: true,
@@ -99,6 +105,8 @@ impl Property {
     pub fn readonly(value: JsValue) -> Self {
         Property {
             value,
+            get: None,
+            set: None,
             writable: false,
             enumerable: true,
             configurable: false,
@@ -109,10 +117,33 @@ impl Property {
     pub fn readonly_builtin(value: JsValue) -> Self {
         Property {
             value,
+            get: None,
+            set: None,
             writable: false,
             enumerable: false,
             configurable: false,
         }
+    }
+
+    /// Create an accessor property.
+    pub fn accessor(
+        get: Option<JsValue>,
+        set: Option<JsValue>,
+        enumerable: bool,
+        configurable: bool,
+    ) -> Self {
+        Property {
+            value: JsValue::Undefined,
+            get,
+            set,
+            writable: false,
+            enumerable,
+            configurable,
+        }
+    }
+
+    pub fn is_accessor(&self) -> bool {
+        self.get.is_some() || self.set.is_some()
     }
 }
 
@@ -664,6 +695,22 @@ impl JsObject {
     /// Set a property with full descriptor control.
     pub fn define_property(&mut self, name: String, prop: Property) {
         self.properties.insert(name, prop);
+    }
+
+    /// Get an own property descriptor, if any.
+    pub fn get_own_property_descriptor(&self, name: &str) -> Option<Property> {
+        self.properties.get(name).cloned()
+    }
+
+    /// Get a property descriptor, walking the prototype chain.
+    pub fn get_property_descriptor(&self, name: &str) -> Option<Property> {
+        if let Some(prop) = self.properties.get(name) {
+            return Some(prop.clone());
+        }
+        if let Some(ref proto) = self.prototype {
+            return proto.borrow().get_property_descriptor(name);
+        }
+        None
     }
 
     /// Get an array element by index.

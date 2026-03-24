@@ -432,6 +432,7 @@ impl Compiler {
                 if update.prefix {
                     // Load, increment/decrement, store, result is new value.
                     self.compile_identifier_load(&id.name)?;
+                    self.emit(Instruction::Pos);
                     let one = self.add_number_constant(1.0)?;
                     self.emit(Instruction::LoadConst(one));
                     self.emit(match update.operator {
@@ -445,12 +446,9 @@ impl Compiler {
                 } else {
                     // Postfix: result is old value.
                     self.compile_identifier_load(&id.name)?;
-                    self.emit(Instruction::Dup); // save old value
-                    let one = self.add_number_constant(1.0)?;
-                    self.emit(Instruction::LoadConst(one));
                     self.emit(match update.operator {
-                        UpdateOp::Increment => Instruction::Add,
-                        UpdateOp::Decrement => Instruction::Sub,
+                        UpdateOp::Increment => Instruction::PostfixIncrement,
+                        UpdateOp::Decrement => Instruction::PostfixDecrement,
                     });
                     // StoreLocal/StoreGlobal pops the new value from stack.
                     // The old value remains on the stack as the expression result.
@@ -458,49 +456,75 @@ impl Compiler {
                 }
             }
             Expression::Member(member) => {
-                // obj.prop++ or obj[expr]++
+                let obj_slot = self.declare_temp_local("update_obj")?;
+                let new_slot = self.declare_temp_local("update_new")?;
+                let old_slot = if update.prefix {
+                    None
+                } else {
+                    Some(self.declare_temp_local("update_old")?)
+                };
+
                 self.compile_expression(&member.object)?;
+                self.emit(Instruction::StoreLocal(obj_slot));
+
+                let one = self.add_number_constant(1.0)?;
+                let op_instr = match update.operator {
+                    UpdateOp::Increment => Instruction::Add,
+                    UpdateOp::Decrement => Instruction::Sub,
+                };
+
                 if member.computed {
+                    let key_slot = self.declare_temp_local("update_key")?;
                     self.compile_expression(&member.property)?;
-                    self.emit(Instruction::Dup); // keep key
-                                                 // Stack: [obj, key, key]
-                                                 // We need: GetComputed(obj, key), then Inc, then SetComputed(obj, key, new_val)
-                                                 // This is complex without more stack ops. Simplified approach:
+                    self.emit(Instruction::StoreLocal(key_slot));
+
+                    self.emit(Instruction::LoadLocal(obj_slot));
+                    self.emit(Instruction::LoadLocal(key_slot));
                     self.emit(Instruction::GetComputed);
-                    if update.prefix {
-                        let one = self.add_number_constant(1.0)?;
-                        self.emit(Instruction::LoadConst(one));
-                        self.emit(match update.operator {
-                            UpdateOp::Increment => Instruction::Add,
-                            UpdateOp::Decrement => Instruction::Sub,
-                        });
-                    } else {
-                        // Need postfix: keep old value, compute new, store
+                    if let Some(old_slot) = old_slot {
                         self.emit(match update.operator {
                             UpdateOp::Increment => Instruction::PostfixIncrement,
                             UpdateOp::Decrement => Instruction::PostfixDecrement,
                         });
+                        self.emit(Instruction::StoreLocal(new_slot));
+                        self.emit(Instruction::StoreLocal(old_slot));
+                    } else {
+                        self.emit(Instruction::Pos);
+                        self.emit(Instruction::LoadConst(one));
+                        self.emit(op_instr);
+                        self.emit(Instruction::StoreLocal(new_slot));
                     }
+                    self.emit(Instruction::LoadLocal(obj_slot));
+                    self.emit(Instruction::LoadLocal(key_slot));
+                    self.emit(Instruction::LoadLocal(new_slot));
+                    self.emit(Instruction::SetComputed);
                 } else {
                     let name = expression_to_property_name(&member.property)?;
                     let idx = self.add_string_constant(&name)?;
-                    self.emit(Instruction::Dup); // keep obj
+
+                    self.emit(Instruction::LoadLocal(obj_slot));
                     self.emit(Instruction::GetProperty(idx));
-                    if update.prefix {
-                        let one = self.add_number_constant(1.0)?;
-                        self.emit(Instruction::LoadConst(one));
-                        self.emit(match update.operator {
-                            UpdateOp::Increment => Instruction::Add,
-                            UpdateOp::Decrement => Instruction::Sub,
-                        });
-                        self.emit(Instruction::SetProperty(idx));
-                    } else {
+                    if let Some(old_slot) = old_slot {
                         self.emit(match update.operator {
                             UpdateOp::Increment => Instruction::PostfixIncrement,
                             UpdateOp::Decrement => Instruction::PostfixDecrement,
                         });
-                        self.emit(Instruction::SetProperty(idx));
+                        self.emit(Instruction::StoreLocal(new_slot));
+                        self.emit(Instruction::StoreLocal(old_slot));
+                    } else {
+                        self.emit(Instruction::Pos);
+                        self.emit(Instruction::LoadConst(one));
+                        self.emit(op_instr);
+                        self.emit(Instruction::StoreLocal(new_slot));
                     }
+                    self.emit(Instruction::LoadLocal(obj_slot));
+                    self.emit(Instruction::LoadLocal(new_slot));
+                    self.emit(Instruction::SetProperty(idx));
+                }
+
+                if let Some(old_slot) = old_slot {
+                    self.emit(Instruction::Pop);
+                    self.emit(Instruction::LoadLocal(old_slot));
                 }
             }
             _ => {
