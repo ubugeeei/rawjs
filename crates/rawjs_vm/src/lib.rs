@@ -1628,4 +1628,18 @@ mod tests {
         let result = vm.get_global("result").cloned().unwrap();
         assert_eq!(result, JsValue::Boolean(true));
     }
+
+    #[test]
+    fn test_execute_arguments_object_uses_object_prototype() {
+        let vm = execute_source(
+            r#"
+            function testcase() {
+              result = Object.getPrototypeOf(arguments) === Object.getPrototypeOf({});
+            }
+            testcase();
+            "#,
+        );
+        let result = vm.get_global("result").cloned().unwrap();
+        assert_eq!(result, JsValue::Boolean(true));
+    }
 }

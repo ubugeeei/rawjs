@@ -891,6 +891,9 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
                 .map(|frame| vm.chunks[frame.chunk_index].param_count as usize)
                 .unwrap_or(0);
             let mut obj = JsObject::ordinary();
+            if let Some(proto) = &vm.object_prototype {
+                obj.prototype = Some(proto.clone());
+            }
             obj.internal = ObjectInternal::ArgumentsObject(
                 (0..args.len())
                     .map(|index| {
