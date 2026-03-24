@@ -96,8 +96,15 @@ impl JitCompiler {
 
     /// Returns false for chunks containing instructions that cannot be JIT-compiled.
     fn is_jittable(_chunk: &Chunk) -> bool {
-        // All instructions are now JIT-compilable via stubs.
-        true
+        _chunk.instructions.iter().all(|instr| match instr {
+            Instruction::New(_)
+            | Instruction::InitGlobal(_)
+            | Instruction::LoadGlobalOrUndefined(_)
+            | Instruction::DeleteName(_)
+            | Instruction::DeleteProperty
+            | Instruction::LoadArguments => false,
+            _ => true,
+        })
     }
 
     // =============================================================
@@ -175,6 +182,10 @@ impl JitCompiler {
             Instruction::LoadGlobal(idx) => {
                 self.emit_stub_call_1(stubs::stub_load_global as *const () as usize, idx as u32);
             }
+            Instruction::InitGlobal(_) => std::panic::panic_any("JIT does not support INIT_GLOBAL"),
+            Instruction::LoadGlobalOrUndefined(_) => {
+                std::panic::panic_any("JIT does not support LOAD_GLOBAL_OR_UNDEFINED")
+            }
             Instruction::StoreGlobal(idx) => {
                 self.emit_stub_call_1(stubs::stub_store_global as *const () as usize, idx as u32);
             }
@@ -220,6 +231,9 @@ impl JitCompiler {
             Instruction::TypeOf => self.emit_stub_call_0(stubs::stub_typeof as *const () as usize),
             Instruction::Void => self.emit_stub_call_0(stubs::stub_void as *const () as usize),
             Instruction::Delete => self.emit_stub_call_0(stubs::stub_delete as *const () as usize),
+            Instruction::DeleteName(_) | Instruction::DeleteProperty => {
+                std::panic::panic_any("JIT does not support delete name/property")
+            }
 
             // --- Comparison ---
             Instruction::Eq => self.emit_stub_call_0(stubs::stub_eq as *const () as usize),
@@ -248,6 +262,7 @@ impl JitCompiler {
             Instruction::Instanceof => {
                 self.emit_stub_call_0(stubs::stub_instanceof as *const () as usize)
             }
+            Instruction::LoadArguments => std::panic::panic_any("JIT does not support LOAD_ARGUMENTS"),
 
             // --- Postfix ---
             Instruction::PostfixIncrement => {
@@ -289,6 +304,9 @@ impl JitCompiler {
             // --- Function calls ---
             Instruction::Call(argc) => {
                 self.emit_stub_call_1(stubs::stub_call as *const () as usize, argc as u32);
+            }
+            Instruction::New(_) => {
+                std::panic::panic_any("JIT does not support NEW")
             }
             Instruction::CallMethod(argc) => {
                 self.emit_stub_call_1(stubs::stub_call_method as *const () as usize, argc as u32);

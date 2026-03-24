@@ -314,7 +314,7 @@ impl Parser {
                 TokenKind::GreaterThan => BinaryOp::Gt,
                 TokenKind::GreaterEqual => BinaryOp::Ge,
                 TokenKind::Instanceof => BinaryOp::Instanceof,
-                TokenKind::In => BinaryOp::In,
+                TokenKind::In if self.allow_in => BinaryOp::In,
                 _ => break,
             };
             self.advance();

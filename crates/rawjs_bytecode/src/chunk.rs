@@ -24,6 +24,8 @@ pub struct Chunk {
     pub is_generator: bool,
     /// Whether this chunk is an async function body.
     pub is_async: bool,
+    /// Whether this chunk is in strict mode.
+    pub is_strict: bool,
 }
 
 /// A compile-time constant value stored in a chunk's constant pool.
@@ -51,6 +53,7 @@ impl Chunk {
             upvalue_descriptors: Vec::new(),
             is_generator: false,
             is_async: false,
+            is_strict: false,
         }
     }
 

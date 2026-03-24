@@ -18,6 +18,12 @@ pub fn create_number_prototype(heap: &mut Heap) -> GcPtr<JsObject> {
     heap.alloc(obj)
 }
 
+pub fn number_constructor(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -> Result<JsValue> {
+    Ok(JsValue::Number(
+        args.first().unwrap_or(&JsValue::Undefined).to_number(),
+    ))
+}
+
 fn number_to_string_method(_heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> Result<JsValue> {
     let n = this.to_number();
     let radix = args.first().map(|v| v.to_number() as u32).unwrap_or(10);

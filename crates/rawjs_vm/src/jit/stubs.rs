@@ -726,7 +726,12 @@ pub extern "C" fn stub_set_property(vm: *mut Vm, idx: u32) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    match crate::interpreter::set_property_value(&obj_val, &name, &value) {
+    let is_strict = vm
+        .call_stack
+        .last()
+        .map(|frame| frame.is_strict)
+        .unwrap_or(false);
+    match crate::interpreter::set_property_value(&obj_val, &name, &value, is_strict) {
         Ok(()) => {
             vm.push(value);
             0
@@ -772,7 +777,12 @@ pub extern "C" fn stub_set_index(vm: *mut Vm) -> u32 {
         Err(e) => return set_error(vm, e),
     };
     let key = index.to_js_string();
-    match crate::interpreter::set_property_value(&obj_val, &key, &value) {
+    let is_strict = vm
+        .call_stack
+        .last()
+        .map(|frame| frame.is_strict)
+        .unwrap_or(false);
+    match crate::interpreter::set_property_value(&obj_val, &key, &value, is_strict) {
         Ok(()) => {
             vm.push(value);
             0
@@ -818,7 +828,12 @@ pub extern "C" fn stub_set_computed(vm: *mut Vm) -> u32 {
         Err(e) => return set_error(vm, e),
     };
     let key_str = key.to_js_string();
-    match crate::interpreter::set_property_value(&obj_val, &key_str, &value) {
+    let is_strict = vm
+        .call_stack
+        .last()
+        .map(|frame| frame.is_strict)
+        .unwrap_or(false);
+    match crate::interpreter::set_property_value(&obj_val, &key_str, &value, is_strict) {
         Ok(()) => {
             vm.push(value);
             0

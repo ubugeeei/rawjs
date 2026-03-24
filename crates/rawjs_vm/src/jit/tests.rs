@@ -21,6 +21,8 @@ fn jit_execute_via_vm(chunk: Chunk, args: &[JsValue]) -> JsValue {
         ip: 0,
         base: 0,
         locals: Vec::new(),
+        arguments: Vec::new(),
+        is_strict: false,
         upvalues: Vec::new(),
         this_value: JsValue::Undefined,
     });
@@ -42,6 +44,8 @@ fn jit_execute_via_vm(chunk: Chunk, args: &[JsValue]) -> JsValue {
         ip: 0,
         base: vm.value_stack.len(),
         locals,
+        arguments: Vec::new(),
+        is_strict: false,
         upvalues: Vec::new(),
         this_value: JsValue::Undefined,
     };

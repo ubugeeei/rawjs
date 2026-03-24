@@ -8,13 +8,18 @@ use rawjs_lexer::{Lexer, Token, TokenKind};
 pub struct Parser {
     pub(crate) tokens: Vec<Token>,
     pub(crate) pos: usize,
+    pub(crate) allow_in: bool,
 }
 
 impl Parser {
     pub fn new(source: &str) -> Result<Self> {
         let mut lexer = Lexer::new(source);
         let tokens = lexer.tokenize()?;
-        Ok(Self { tokens, pos: 0 })
+        Ok(Self {
+            tokens,
+            pos: 0,
+            allow_in: true,
+        })
     }
 
     pub(crate) fn peek(&self) -> &TokenKind {

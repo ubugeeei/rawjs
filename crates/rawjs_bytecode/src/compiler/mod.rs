@@ -16,10 +16,17 @@ use crate::opcode::Instruction;
 pub(crate) struct Local {
     pub(crate) name: String,
     pub(crate) depth: u32,
+    pub(crate) storage: LocalStorage,
     /// Set to `true` when a nested function captures this local as an upvalue.
     /// Used by the VM to keep the value alive after the scope exits.
     #[allow(dead_code)]
     pub(crate) is_captured: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LocalStorage {
+    Local,
+    GlobalAlias,
 }
 
 /// Describes how an upvalue is captured.
@@ -87,6 +94,10 @@ pub struct Compiler {
     pub(crate) is_generator: bool,
     /// Whether the current function is async.
     pub(crate) is_async: bool,
+    /// Whether the current scope is in strict mode.
+    pub(crate) is_strict: bool,
+    /// Whether the current scope is a function body.
+    pub(crate) in_function: bool,
     /// Stack of dispose-tracking scopes. Each entry is a list of local slots
     /// that hold `using` resources and need to be disposed when the scope exits.
     /// Outer Vec = scope stack, inner Vec = (slot, is_await) pairs.
@@ -101,6 +112,8 @@ impl Compiler {
     /// Compile a parsed program into a top-level bytecode chunk.
     pub fn compile_program(program: &Program) -> Result<Chunk> {
         let mut compiler = Compiler::new("<script>");
+        compiler.is_strict = has_use_strict_directive(&program.body);
+        compiler.chunk.is_strict = compiler.is_strict;
 
         // Hoist import declarations to the top (ESM semantics).
         for stmt in &program.body {
@@ -164,6 +177,8 @@ impl Compiler {
             parent_upvalues: Vec::new(),
             is_generator: false,
             is_async: false,
+            is_strict: false,
+            in_function: false,
             dispose_scopes: Vec::new(),
         }
     }
@@ -203,6 +218,14 @@ impl Compiler {
     /// Declare a local in the current scope, push `Undefined` as placeholder,
     /// and return its slot index.
     pub(crate) fn declare_local(&mut self, name: &str) -> Result<u16> {
+        self.declare_local_with_storage(name, LocalStorage::Local)
+    }
+
+    pub(crate) fn declare_global_alias_local(&mut self, name: &str) -> Result<u16> {
+        self.declare_local_with_storage(name, LocalStorage::GlobalAlias)
+    }
+
+    fn declare_local_with_storage(&mut self, name: &str, storage: LocalStorage) -> Result<u16> {
         let index = self.locals.len();
         if index > u16::MAX as usize {
             return Err(RawJsError::internal_error("Too many local variables"));
@@ -210,6 +233,7 @@ impl Compiler {
         self.locals.push(Local {
             name: name.to_string(),
             depth: self.scope_depth,
+            storage,
             is_captured: false,
         });
         if self.locals.len() > self.max_locals {
@@ -226,6 +250,11 @@ impl Compiler {
             }
         }
         None
+    }
+
+    pub(crate) fn resolve_local_storage(&self, name: &str) -> Option<(u16, LocalStorage)> {
+        self.resolve_local(name)
+            .map(|slot| (slot, self.locals[slot as usize].storage))
     }
 
     /// Resolve a name to an upvalue index by searching the parallel
@@ -319,11 +348,20 @@ impl Compiler {
 
     pub(crate) fn hoist_function_declaration(&mut self, func: &FunctionDeclaration) -> Result<()> {
         if let Some(ref name) = func.id {
-            let slot = self.declare_local(name)?;
+            let slot = if !self.in_function && self.scope_depth == 0 {
+                self.declare_global_alias_local(name)?
+            } else {
+                self.declare_local(name)?
+            };
             // Emit Undefined placeholder -- will be overwritten immediately.
             self.emit(Instruction::Undefined);
             self.compile_function_body(func)?;
             self.emit(Instruction::StoreLocal(slot));
+            if !self.in_function && self.scope_depth == 0 {
+                self.emit(Instruction::LoadLocal(slot));
+                let idx = self.add_string_constant(name)?;
+                self.emit(Instruction::InitGlobal(idx));
+            }
             self.emit(Instruction::Pop);
         }
         Ok(())
@@ -349,6 +387,20 @@ impl Compiler {
             }
         }
     }
+}
+
+fn has_use_strict_directive(statements: &[Statement]) -> bool {
+    for stmt in statements {
+        match stmt {
+            Statement::Expression(expr_stmt) => match &expr_stmt.expression {
+                Expression::StringLiteral(lit) if lit.value == "use strict" => return true,
+                Expression::StringLiteral(_) => continue,
+                _ => return false,
+            },
+            _ => return false,
+        }
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------

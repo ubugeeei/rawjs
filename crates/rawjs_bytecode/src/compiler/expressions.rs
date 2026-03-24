@@ -4,7 +4,10 @@ use rawjs_common::{RawJsError, Result};
 use crate::chunk::Constant;
 use crate::opcode::Instruction;
 
-use super::{expression_to_property_name, pattern_to_name, Compiler, ParentLocal, ParentUpvalue};
+use super::{
+    expression_to_property_name, pattern_to_name, Compiler, LocalStorage, ParentLocal,
+    ParentUpvalue,
+};
 
 impl Compiler {
     // ------------------------------------------------------------------
@@ -99,10 +102,20 @@ impl Compiler {
     }
 
     pub(crate) fn compile_identifier_load(&mut self, name: &str) -> Result<()> {
-        if let Some(slot) = self.resolve_local(name) {
-            self.emit(Instruction::LoadLocal(slot));
+        if let Some((slot, storage)) = self.resolve_local_storage(name) {
+            match storage {
+                LocalStorage::Local => {
+                    self.emit(Instruction::LoadLocal(slot));
+                }
+                LocalStorage::GlobalAlias => {
+                    let idx = self.add_string_constant(name)?;
+                    self.emit(Instruction::LoadGlobal(idx));
+                }
+            }
         } else if let Some(uv) = self.resolve_upvalue(name) {
             self.emit(Instruction::LoadUpvalue(uv));
+        } else if self.in_function && name == "arguments" {
+            self.emit(Instruction::LoadArguments);
         } else {
             let idx = self.add_string_constant(name)?;
             self.emit(Instruction::LoadGlobal(idx));
@@ -111,8 +124,16 @@ impl Compiler {
     }
 
     pub(crate) fn compile_identifier_store(&mut self, name: &str) -> Result<()> {
-        if let Some(slot) = self.resolve_local(name) {
-            self.emit(Instruction::StoreLocal(slot));
+        if let Some((slot, storage)) = self.resolve_local_storage(name) {
+            match storage {
+                LocalStorage::Local => {
+                    self.emit(Instruction::StoreLocal(slot));
+                }
+                LocalStorage::GlobalAlias => {
+                    let idx = self.add_string_constant(name)?;
+                    self.emit(Instruction::StoreGlobal(idx));
+                }
+            }
         } else if let Some(uv) = self.resolve_upvalue(name) {
             self.emit(Instruction::StoreUpvalue(uv));
         } else {
@@ -172,6 +193,9 @@ impl Compiler {
         let name = "<arrow>";
         let mut child = Compiler::new(name);
         child.chunk.param_count = arrow.params.len() as u16;
+        child.in_function = true;
+        child.is_strict = self.is_strict;
+        child.chunk.is_strict = child.is_strict;
 
         // Propagate async flag for arrow functions.
         child.is_async = arrow.is_async;
@@ -182,6 +206,7 @@ impl Compiler {
             .locals
             .iter()
             .enumerate()
+            .filter(|(_, local)| local.storage == LocalStorage::Local)
             .map(|(i, l)| ParentLocal {
                 name: l.name.clone(),
                 index: i as u16,
@@ -235,6 +260,9 @@ impl Compiler {
         let name = func.id.as_deref().unwrap_or("<anonymous>");
         let mut child = Compiler::new(name);
         child.chunk.param_count = func.params.len() as u16;
+        child.in_function = true;
+        child.is_strict = self.is_strict || super::has_use_strict_directive(&func.body.body);
+        child.chunk.is_strict = child.is_strict;
 
         // Propagate generator/async flags.
         child.is_generator = func.is_generator;
@@ -247,6 +275,7 @@ impl Compiler {
             .locals
             .iter()
             .enumerate()
+            .filter(|(_, local)| local.storage == LocalStorage::Local)
             .map(|(i, l)| ParentLocal {
                 name: l.name.clone(),
                 index: i as u16,
@@ -340,7 +369,19 @@ impl Compiler {
                         let idx = self.add_string_constant(&name)?;
                         self.emit(Instruction::LoadConst(idx));
                     }
-                    self.emit(Instruction::Delete);
+                    self.emit(Instruction::DeleteProperty);
+                    return Ok(());
+                }
+                Expression::Identifier(id) => {
+                    if self.resolve_local(&id.name).is_some()
+                        || self.resolve_upvalue(&id.name).is_some()
+                        || (self.in_function && id.name == "arguments")
+                    {
+                        self.emit(Instruction::False);
+                    } else {
+                        let idx = self.add_string_constant(&id.name)?;
+                        self.emit(Instruction::DeleteName(idx));
+                    }
                     return Ok(());
                 }
                 _ => {
@@ -356,9 +397,15 @@ impl Compiler {
         // Special handling for `typeof` on identifiers (should not throw ReferenceError).
         if unary.operator == UnaryOp::Typeof {
             if let Expression::Identifier(id) = unary.argument.as_ref() {
-                // Use LoadGlobal which will push undefined for undeclared vars
-                // at runtime. The VM should handle this gracefully.
-                self.compile_identifier_load(&id.name)?;
+                if self.resolve_local(&id.name).is_some()
+                    || self.resolve_upvalue(&id.name).is_some()
+                    || (self.in_function && id.name == "arguments")
+                {
+                    self.compile_identifier_load(&id.name)?;
+                } else {
+                    let idx = self.add_string_constant(&id.name)?;
+                    self.emit(Instruction::LoadGlobalOrUndefined(idx));
+                }
                 self.emit(Instruction::TypeOf);
                 return Ok(());
             }
@@ -687,8 +734,6 @@ impl Compiler {
 
     fn compile_new(&mut self, new_expr: &NewExpression) -> Result<()> {
         // new Constructor(args)
-        // For a complete implementation, `new` would use a different opcode.
-        // Here we simulate it by calling the constructor.
         self.compile_expression(&new_expr.callee)?;
 
         let argc = new_expr.arguments.len();
@@ -699,8 +744,7 @@ impl Compiler {
             self.compile_expression(arg)?;
         }
 
-        // Use Call for now; a proper VM would distinguish `new` calls.
-        self.emit(Instruction::Call(argc as u16));
+        self.emit(Instruction::New(argc as u16));
         Ok(())
     }
 

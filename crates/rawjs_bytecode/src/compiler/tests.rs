@@ -217,8 +217,11 @@ fn compile_unary_typeof() {
         location: loc(),
     }))]);
     let chunk = Compiler::compile_program(&prog).unwrap();
-    // LoadGlobal("x"), TypeOf, Pop, Undefined, Return
-    assert!(matches!(chunk.instructions[0], Instruction::LoadGlobal(_)));
+    // LoadGlobalOrUndefined("x"), TypeOf, Pop, Undefined, Return
+    assert!(matches!(
+        chunk.instructions[0],
+        Instruction::LoadGlobalOrUndefined(_)
+    ));
     assert_eq!(chunk.instructions[1], Instruction::TypeOf);
 }
 
@@ -751,6 +754,43 @@ fn compile_assignment_simple() {
 }
 
 #[test]
+fn compile_top_level_var_accesses_use_global_binding() {
+    let prog = program(vec![
+        Statement::VariableDeclaration(VariableDeclaration {
+            kind: VarKind::Var,
+            declarations: vec![VariableDeclarator {
+                id: ident_pat("count"),
+                init: Some(num_lit(0.0)),
+                location: loc(),
+            }],
+            location: loc(),
+        }),
+        expr_stmt(Expression::Assignment(AssignmentExpression {
+            operator: AssignmentOp::Assign,
+            left: Box::new(ident_expr("count")),
+            right: Box::new(num_lit(1.0)),
+            location: loc(),
+        })),
+        expr_stmt(ident_expr("count")),
+    ]);
+
+    let chunk = Compiler::compile_program(&prog).unwrap();
+
+    assert!(chunk
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instruction::InitGlobal(_))));
+    assert!(chunk
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instruction::StoreGlobal(_))));
+    assert!(chunk
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instruction::LoadGlobal(_))));
+}
+
+#[test]
 fn compile_compound_assignment() {
     // let x = 10; x += 5;
     let prog = program(vec![
@@ -1074,6 +1114,49 @@ fn compile_nested_functions() {
 }
 
 #[test]
+fn compile_nested_function_uses_globals_for_top_level_var() {
+    let prog = program(vec![
+        Statement::VariableDeclaration(VariableDeclaration {
+            kind: VarKind::Var,
+            declarations: vec![VariableDeclarator {
+                id: ident_pat("count"),
+                init: Some(num_lit(0.0)),
+                location: loc(),
+            }],
+            location: loc(),
+        }),
+        Statement::FunctionDeclaration(FunctionDeclaration {
+            id: Some("inc".to_string()),
+            params: vec![],
+            body: Box::new(BlockStatement {
+                body: vec![expr_stmt(Expression::Assignment(AssignmentExpression {
+                    operator: AssignmentOp::Assign,
+                    left: Box::new(ident_expr("count")),
+                    right: Box::new(binary(BinaryOp::Add, ident_expr("count"), num_lit(1.0))),
+                    location: loc(),
+                }))],
+                location: loc(),
+            }),
+            is_async: false,
+            is_generator: false,
+            location: loc(),
+        }),
+    ]);
+
+    let chunk = Compiler::compile_program(&prog).unwrap();
+    let inc = chunk.constants.iter().find_map(|c| match c {
+        Constant::Function(f) if f.name == "inc" => Some(f),
+        _ => None,
+    });
+    let inc = inc.expect("Should have inc function");
+
+    assert_eq!(inc.upvalue_count, 0);
+    assert!(matches!(inc.instructions[0], Instruction::LoadGlobal(_)));
+    assert!(matches!(inc.instructions[2], Instruction::Add));
+    assert!(matches!(inc.instructions[4], Instruction::StoreGlobal(_)));
+}
+
+#[test]
 fn compile_multiple_variables() {
     // let a = 1, b = 2;
     let prog = program(vec![Statement::VariableDeclaration(VariableDeclaration {
@@ -1115,8 +1198,8 @@ fn compile_delete_member() {
     let has_delete = chunk
         .instructions
         .iter()
-        .any(|i| matches!(i, Instruction::Delete));
-    assert!(has_delete, "delete obj.prop should emit Delete");
+        .any(|i| matches!(i, Instruction::DeleteProperty));
+    assert!(has_delete, "delete obj.prop should emit DeleteProperty");
 }
 
 #[test]

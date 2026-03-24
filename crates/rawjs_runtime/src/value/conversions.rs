@@ -79,6 +79,7 @@ impl JsValue {
                     ObjectInternal::Function(f) => {
                         format!("function {}() {{ [native code] }}", f.name)
                     }
+                    ObjectInternal::StringObject(value) => value.clone(),
                     ObjectInternal::Error(msg) => msg.clone(),
                     ObjectInternal::Iterator(_) => "[object Iterator]".to_string(),
                     ObjectInternal::Map(_) => "[object Map]".to_string(),

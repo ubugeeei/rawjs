@@ -36,6 +36,25 @@ pub fn create_array_prototype(heap: &mut Heap) -> GcPtr<JsObject> {
     heap.alloc(obj)
 }
 
+pub fn array_constructor(heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> Result<JsValue> {
+    let elements = if args.len() == 1 {
+        match args.first().unwrap() {
+            JsValue::Number(n) if *n >= 0.0 && n.fract() == 0.0 => {
+                vec![JsValue::Undefined; *n as usize]
+            }
+            other => vec![other.clone()],
+        }
+    } else {
+        args.to_vec()
+    };
+
+    let ptr = heap.alloc(JsObject::array(elements));
+    if let JsValue::Object(this_ptr) = this {
+        ptr.borrow_mut().prototype = this_ptr.borrow().prototype.clone();
+    }
+    Ok(JsValue::Object(ptr))
+}
+
 fn array_push(_heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> Result<JsValue> {
     let ptr = match this {
         JsValue::Object(p) => p.clone(),
@@ -386,7 +405,7 @@ fn array_to_string(_heap: &mut Heap, this: &JsValue, _args: &[JsValue]) -> Resul
     Ok(JsValue::string(parts.join(",")))
 }
 
-fn array_is_array(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -> Result<JsValue> {
+pub fn array_is_array(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -> Result<JsValue> {
     let val = args.first().unwrap_or(&JsValue::Undefined);
     Ok(JsValue::Boolean(val.is_array()))
 }

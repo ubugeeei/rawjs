@@ -17,8 +17,12 @@ pub enum Instruction {
 
     /// Push the value of a global variable (by name-constant index) onto the stack.
     LoadGlobal(u16),
+    /// Push the value of a global variable, or `undefined` if it is unresolvable.
+    LoadGlobalOrUndefined(u16),
     /// Pop the top of the stack and store it in a global variable (by name-constant index).
     StoreGlobal(u16),
+    /// Initialize or overwrite a global binding without strict-mode checks.
+    InitGlobal(u16),
 
     /// Push the value of an upvalue onto the stack.
     LoadUpvalue(u16),
@@ -64,6 +68,10 @@ pub enum Instruction {
     TypeOf,
     Void,
     Delete,
+    /// Delete a named global binding.
+    DeleteName(u16),
+    /// Delete a property from an object.
+    DeleteProperty,
 
     // ---- control flow ----
     /// Unconditional jump by a signed offset (relative to *next* instruction).
@@ -77,6 +85,9 @@ pub enum Instruction {
     /// Call a function with `arg_count` arguments. The function and arguments must
     /// already be on the stack (function pushed first, then arguments left-to-right).
     Call(u16),
+    /// Construct a new object with `arg_count` arguments.
+    /// The constructor and arguments must already be on the stack.
+    New(u16),
     /// Method call with `arg_count` arguments.
     /// Stack: `[..., receiver, method, arg0, arg1, ...]` -> `[..., result]`
     /// The receiver becomes `this` inside the method.
@@ -133,6 +144,10 @@ pub enum Instruction {
     // ---- relational keywords ----
     In,
     Instanceof,
+
+    // ---- function meta ----
+    /// Create and push the current frame's `arguments` object.
+    LoadArguments,
 
     // ---- iterator (for-of) ----
     /// Get the iterator from TOS object by calling [Symbol.iterator]().
@@ -205,7 +220,9 @@ impl Instruction {
             Instruction::LoadLocal(_) => "LOAD_LOCAL",
             Instruction::StoreLocal(_) => "STORE_LOCAL",
             Instruction::LoadGlobal(_) => "LOAD_GLOBAL",
+            Instruction::LoadGlobalOrUndefined(_) => "LOAD_GLOBAL_OR_UNDEFINED",
             Instruction::StoreGlobal(_) => "STORE_GLOBAL",
+            Instruction::InitGlobal(_) => "INIT_GLOBAL",
             Instruction::LoadUpvalue(_) => "LOAD_UPVALUE",
             Instruction::StoreUpvalue(_) => "STORE_UPVALUE",
             Instruction::Pop => "POP",
@@ -237,10 +254,13 @@ impl Instruction {
             Instruction::TypeOf => "TYPEOF",
             Instruction::Void => "VOID",
             Instruction::Delete => "DELETE",
+            Instruction::DeleteName(_) => "DELETE_NAME",
+            Instruction::DeleteProperty => "DELETE_PROPERTY",
             Instruction::Jump(_) => "JUMP",
             Instruction::JumpIfFalse(_) => "JUMP_IF_FALSE",
             Instruction::JumpIfTrue(_) => "JUMP_IF_TRUE",
             Instruction::Call(_) => "CALL",
+            Instruction::New(_) => "NEW",
             Instruction::CallMethod(_) => "CALL_METHOD",
             Instruction::Return => "RETURN",
             Instruction::CreateClosure(_) => "CREATE_CLOSURE",
@@ -262,6 +282,7 @@ impl Instruction {
             Instruction::False => "FALSE",
             Instruction::In => "IN",
             Instruction::Instanceof => "INSTANCEOF",
+            Instruction::LoadArguments => "LOAD_ARGUMENTS",
             Instruction::GetIterator => "GET_ITERATOR",
             Instruction::IteratorNext => "ITERATOR_NEXT",
             Instruction::IteratorDone(_) => "ITERATOR_DONE",
@@ -288,10 +309,16 @@ impl std::fmt::Display for Instruction {
             Instruction::LoadLocal(idx) => write!(f, "LOAD_LOCAL {}", idx),
             Instruction::StoreLocal(idx) => write!(f, "STORE_LOCAL {}", idx),
             Instruction::LoadGlobal(idx) => write!(f, "LOAD_GLOBAL {}", idx),
+            Instruction::LoadGlobalOrUndefined(idx) => {
+                write!(f, "LOAD_GLOBAL_OR_UNDEFINED {}", idx)
+            }
             Instruction::StoreGlobal(idx) => write!(f, "STORE_GLOBAL {}", idx),
+            Instruction::InitGlobal(idx) => write!(f, "INIT_GLOBAL {}", idx),
+            Instruction::DeleteName(idx) => write!(f, "DELETE_NAME {}", idx),
             Instruction::LoadUpvalue(idx) => write!(f, "LOAD_UPVALUE {}", idx),
             Instruction::StoreUpvalue(idx) => write!(f, "STORE_UPVALUE {}", idx),
             Instruction::Call(argc) => write!(f, "CALL {}", argc),
+            Instruction::New(argc) => write!(f, "NEW {}", argc),
             Instruction::CallMethod(argc) => write!(f, "CALL_METHOD {}", argc),
             Instruction::CreateClosure(idx) => write!(f, "CREATE_CLOSURE {}", idx),
             Instruction::CreateArray(cnt) => write!(f, "CREATE_ARRAY {}", cnt),

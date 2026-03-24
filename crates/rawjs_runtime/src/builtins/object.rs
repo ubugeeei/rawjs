@@ -53,6 +53,7 @@ fn object_to_string(_heap: &mut Heap, this: &JsValue, _args: &[JsValue]) -> Resu
             match &o.internal {
                 ObjectInternal::Array(_) => "Array",
                 ObjectInternal::Function(_) => "Function",
+                ObjectInternal::StringObject(_) => "String",
                 ObjectInternal::Error(_) => "Error",
                 ObjectInternal::Iterator(_) => "Iterator",
                 ObjectInternal::Map(_) => "Map",
@@ -117,16 +118,33 @@ fn object_property_is_enumerable(
 // ============================================================================
 
 pub fn create_object_constructor(heap: &mut Heap) -> GcPtr<JsObject> {
-    let mut obj = JsObject::ordinary();
+    let mut obj = JsObject::native_function("Object", object_constructor);
 
     set_native(&mut obj, "keys", object_keys);
     set_native(&mut obj, "values", object_values);
     set_native(&mut obj, "entries", object_entries);
     set_native(&mut obj, "assign", object_assign);
+    set_native(&mut obj, "defineProperty", object_define_property);
     set_native(&mut obj, "freeze", object_freeze);
     set_native(&mut obj, "create", object_create);
+    set_native(&mut obj, "getPrototypeOf", object_get_prototype_of);
+    set_native(&mut obj, "preventExtensions", object_prevent_extensions);
 
     heap.alloc(obj)
+}
+
+fn object_constructor(heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> Result<JsValue> {
+    match args.first() {
+        Some(JsValue::Object(ptr)) => Ok(JsValue::Object(ptr.clone())),
+        Some(JsValue::Null) | Some(JsValue::Undefined) | None => {
+            let ptr = heap.alloc_object(JsObject::ordinary());
+            if let JsValue::Object(this_ptr) = this {
+                ptr.borrow_mut().prototype = this_ptr.borrow().prototype.clone();
+            }
+            Ok(JsValue::Object(ptr))
+        }
+        Some(value) => Ok(value.clone()),
+    }
 }
 
 fn object_keys(heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -> Result<JsValue> {
@@ -207,6 +225,41 @@ fn object_assign(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -> Result<
     Ok(JsValue::Object(target))
 }
 
+fn object_define_property(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -> Result<JsValue> {
+    let target = match args.first() {
+        Some(JsValue::Object(ptr)) => ptr.clone(),
+        _ => {
+            return Err(RawJsError::type_error(
+                "Object.defineProperty called on non-object",
+            ))
+        }
+    };
+    let key = args
+        .get(1)
+        .unwrap_or(&JsValue::Undefined)
+        .to_string_value();
+    let descriptor = match args.get(2) {
+        Some(JsValue::Object(ptr)) => ptr.clone(),
+        _ => {
+            return Err(RawJsError::type_error(
+                "Property description must be an object",
+            ))
+        }
+    };
+
+    let descriptor = descriptor.borrow();
+    let prop = crate::object::Property {
+        value: descriptor.get_property("value"),
+        writable: descriptor.get_property("writable").to_boolean(),
+        enumerable: descriptor.get_property("enumerable").to_boolean(),
+        configurable: descriptor.get_property("configurable").to_boolean(),
+    };
+    drop(descriptor);
+
+    target.borrow_mut().define_property(key, prop);
+    Ok(JsValue::Object(target))
+}
+
 fn object_freeze(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -> Result<JsValue> {
     let target = match args.first() {
         Some(JsValue::Object(ptr)) => ptr.clone(),
@@ -238,6 +291,36 @@ fn object_create(heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -> Result<J
     };
     let ptr = heap.alloc_object(obj);
     Ok(JsValue::Object(ptr))
+}
+
+fn object_get_prototype_of(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -> Result<JsValue> {
+    let target = match args.first() {
+        Some(JsValue::Object(ptr)) => ptr.clone(),
+        _ => {
+            return Err(RawJsError::type_error(
+                "Object.getPrototypeOf called on non-object",
+            ))
+        }
+    };
+    let prototype = target.borrow().prototype.clone();
+    Ok(match prototype {
+        Some(ptr) => JsValue::Object(ptr),
+        None => JsValue::Null,
+    })
+}
+
+fn object_prevent_extensions(
+    _heap: &mut Heap,
+    _this: &JsValue,
+    args: &[JsValue],
+) -> Result<JsValue> {
+    let target = match args.first() {
+        Some(JsValue::Object(ptr)) => ptr.clone(),
+        Some(other) => return Ok(other.clone()),
+        None => return Ok(JsValue::Undefined),
+    };
+    target.borrow_mut().extensible = false;
+    Ok(JsValue::Object(target))
 }
 
 #[cfg(test)]
@@ -275,5 +358,60 @@ mod tests {
         } else {
             panic!("Expected array");
         }
+    }
+
+    #[test]
+    fn test_object_define_property_builtin() {
+        let mut heap = Heap::new();
+        let target = heap.alloc(JsObject::ordinary());
+        let mut descriptor = JsObject::ordinary();
+        descriptor.set_property("writable".to_string(), JsValue::Boolean(false));
+        let descriptor = heap.alloc(descriptor);
+
+        let result = object_define_property(
+            &mut heap,
+            &JsValue::Undefined,
+            &[
+                JsValue::Object(target.clone()),
+                JsValue::string("x"),
+                JsValue::Object(descriptor),
+            ],
+        )
+        .unwrap();
+
+        assert!(matches!(result, JsValue::Object(_)));
+        let prop = target.borrow();
+        let desc = prop.properties.get("x").unwrap();
+        assert!(!desc.writable);
+        assert!(desc.value.is_undefined());
+    }
+
+    #[test]
+    fn test_object_get_prototype_of_and_prevent_extensions() {
+        let mut heap = Heap::new();
+        let proto = heap.alloc(JsObject::ordinary());
+        let target = heap.alloc(JsObject::with_prototype(proto.clone()));
+
+        let actual_proto = object_get_prototype_of(
+            &mut heap,
+            &JsValue::Undefined,
+            &[JsValue::Object(target.clone())],
+        )
+        .unwrap();
+        match actual_proto {
+            JsValue::Object(ptr) => assert!(ptr.ptr_eq(&proto)),
+            _ => panic!("Expected prototype object"),
+        }
+
+        object_prevent_extensions(
+            &mut heap,
+            &JsValue::Undefined,
+            &[JsValue::Object(target.clone())],
+        )
+        .unwrap();
+        assert!(!target.borrow().extensible);
+        assert!(!target
+            .borrow_mut()
+            .try_set_property("x".to_string(), JsValue::Number(1.0)));
     }
 }

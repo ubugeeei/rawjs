@@ -461,7 +461,11 @@ impl Parser {
     }
 
     fn parse_expression_no_in(&mut self) -> Result<Expression> {
-        self.parse_assignment_expression()
+        let allow_in = self.allow_in;
+        self.allow_in = false;
+        let result = self.parse_assignment_expression();
+        self.allow_in = allow_in;
+        result
     }
 
     fn parse_return_statement(&mut self) -> Result<Statement> {

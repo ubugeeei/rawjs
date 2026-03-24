@@ -1,7 +1,7 @@
 use rawjs_common::{RawJsError, Result};
 
 use crate::gc::{GcPtr, Heap};
-use crate::object::JsObject;
+use crate::object::{JsObject, ObjectInternal, Property};
 use crate::value::JsValue;
 
 use super::helpers::{get_this_string, set_native};
@@ -33,6 +33,41 @@ pub fn create_string_prototype(heap: &mut Heap) -> GcPtr<JsObject> {
     set_native(&mut obj, "valueOf", string_value_of);
 
     heap.alloc(obj)
+}
+
+pub fn string_constructor(heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> Result<JsValue> {
+    let value = args
+        .first()
+        .map(|arg| arg.to_string_value())
+        .unwrap_or_default();
+
+    let is_construct_call = match (this, heap.calling_fn.clone()) {
+        (JsValue::Object(this_ptr), Some(fn_ptr)) => {
+            let prototype = match fn_ptr.borrow().get_property("prototype") {
+                JsValue::Object(proto) => Some(proto),
+                _ => None,
+            };
+            match (this_ptr.borrow().prototype.clone(), prototype) {
+                (Some(actual), Some(expected)) => actual.ptr_eq(&expected),
+                _ => false,
+            }
+        }
+        _ => false,
+    };
+
+    if is_construct_call {
+        if let JsValue::Object(this_ptr) = this {
+            let mut obj = this_ptr.borrow_mut();
+            obj.internal = ObjectInternal::StringObject(value.clone());
+            obj.define_property(
+                "length".to_string(),
+                Property::readonly_builtin(JsValue::Number(value.chars().count() as f64)),
+            );
+        }
+        return Ok(this.clone());
+    }
+
+    Ok(JsValue::string(value))
 }
 
 fn string_char_at(_heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> Result<JsValue> {

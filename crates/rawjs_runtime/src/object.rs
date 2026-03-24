@@ -104,6 +104,16 @@ impl Property {
             configurable: false,
         }
     }
+
+    /// Create a read-only, non-enumerable property.
+    pub fn readonly_builtin(value: JsValue) -> Self {
+        Property {
+            value,
+            writable: false,
+            enumerable: false,
+            configurable: false,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +210,8 @@ pub enum ObjectInternal {
     Ordinary,
     /// A function object. Holds the chunk index and captured upvalues.
     Function(FunctionObject),
+    /// A boxed String object created by `new String(...)`.
+    StringObject(String),
     /// An array object. Elements stored separately from named properties.
     Array(Vec<JsValue>),
     /// An error object with a message string.
@@ -242,6 +254,7 @@ pub struct GeneratorState {
     pub chunk_index: usize,
     pub ip: usize,
     pub locals: Vec<JsValue>,
+    pub arguments: Vec<JsValue>,
     pub upvalues: Vec<Upvalue>,
     pub saved_stack: Vec<JsValue>,
     pub this_value: JsValue,
@@ -335,6 +348,8 @@ pub struct JsObject {
     pub properties: HashMap<String, Property>,
     /// Symbol-keyed properties (keyed by symbol ID).
     pub symbol_properties: HashMap<u64, Property>,
+    /// Whether new own properties can be added.
+    pub extensible: bool,
     /// Prototype chain link (null = end of chain).
     pub prototype: Option<GcPtr<JsObject>>,
     /// Internal / exotic object behaviour.
@@ -351,6 +366,7 @@ impl JsObject {
         JsObject {
             properties: HashMap::new(),
             symbol_properties: HashMap::new(),
+            extensible: true,
             prototype: None,
             internal: ObjectInternal::Ordinary,
         }
@@ -361,6 +377,7 @@ impl JsObject {
         JsObject {
             properties: HashMap::new(),
             symbol_properties: HashMap::new(),
+            extensible: true,
             prototype: Some(proto),
             internal: ObjectInternal::Ordinary,
         }
@@ -368,9 +385,15 @@ impl JsObject {
 
     /// Create a new function object backed by bytecode.
     pub fn function(chunk_index: usize, upvalues: Vec<Upvalue>, name: String) -> Self {
+        let mut properties = HashMap::new();
+        properties.insert(
+            "prototype".to_string(),
+            Property::builtin(JsValue::Object(GcPtr::new(JsObject::ordinary()))),
+        );
         JsObject {
-            properties: HashMap::new(),
+            properties,
             symbol_properties: HashMap::new(),
+            extensible: true,
             prototype: None,
             internal: ObjectInternal::Function(FunctionObject {
                 kind: FunctionKind::Bytecode { chunk_index },
@@ -383,9 +406,15 @@ impl JsObject {
     /// Create a new native function object.
     pub fn native_function(name: impl Into<String>, func: NativeFn) -> Self {
         let name = name.into();
+        let mut properties = HashMap::new();
+        properties.insert(
+            "prototype".to_string(),
+            Property::builtin(JsValue::Object(GcPtr::new(JsObject::ordinary()))),
+        );
         JsObject {
-            properties: HashMap::new(),
+            properties,
             symbol_properties: HashMap::new(),
+            extensible: true,
             prototype: None,
             internal: ObjectInternal::Function(FunctionObject {
                 kind: FunctionKind::Native(func),
@@ -405,6 +434,7 @@ impl JsObject {
         JsObject {
             properties,
             symbol_properties: HashMap::new(),
+            extensible: true,
             prototype: None,
             internal: ObjectInternal::Array(elements),
         }
@@ -422,6 +452,7 @@ impl JsObject {
         JsObject {
             properties,
             symbol_properties: HashMap::new(),
+            extensible: true,
             prototype: None,
             internal: ObjectInternal::Error(msg),
         }
@@ -432,6 +463,7 @@ impl JsObject {
         JsObject {
             properties: HashMap::new(),
             symbol_properties: HashMap::new(),
+            extensible: true,
             prototype: None,
             internal: ObjectInternal::Iterator(IteratorState::new(values)),
         }
@@ -442,6 +474,7 @@ impl JsObject {
         JsObject {
             properties: HashMap::new(),
             symbol_properties: HashMap::new(),
+            extensible: true,
             prototype: None,
             internal: ObjectInternal::Map(Vec::new()),
         }
@@ -452,6 +485,7 @@ impl JsObject {
         JsObject {
             properties: HashMap::new(),
             symbol_properties: HashMap::new(),
+            extensible: true,
             prototype: None,
             internal: ObjectInternal::Promise(PromiseState::new()),
         }
@@ -462,6 +496,7 @@ impl JsObject {
         JsObject {
             properties: HashMap::new(),
             symbol_properties: HashMap::new(),
+            extensible: true,
             prototype: None,
             internal: ObjectInternal::Set(Vec::new()),
         }
@@ -483,6 +518,7 @@ impl JsObject {
         JsObject {
             properties,
             symbol_properties: HashMap::new(),
+            extensible: true,
             prototype: None,
             internal: ObjectInternal::Error(display),
         }
@@ -542,6 +578,19 @@ impl JsObject {
         if let Some(prop) = self.properties.get(name) {
             return prop.value.clone();
         }
+        // String object index / length access
+        if let ObjectInternal::StringObject(ref value) = self.internal {
+            match name {
+                "length" => return JsValue::Number(value.chars().count() as f64),
+                _ => {
+                    if let Ok(idx) = name.parse::<usize>() {
+                        if let Some(ch) = value.chars().nth(idx) {
+                            return JsValue::string(ch.to_string());
+                        }
+                    }
+                }
+            }
+        }
         // Array index access
         if let ObjectInternal::Array(ref elements) = self.internal {
             if let Ok(idx) = name.parse::<usize>() {
@@ -560,9 +609,23 @@ impl JsObject {
 
     /// Set a named property.
     pub fn set_property(&mut self, name: String, value: JsValue) {
+        let _ = self.try_set_property(name, value);
+    }
+
+    /// Attempt to set a named property. Returns `false` if the write is rejected.
+    pub fn try_set_property(&mut self, name: String, value: JsValue) -> bool {
+        if let Some(existing) = self.properties.get(&name) {
+            if !existing.writable {
+                return false;
+            }
+        }
+
         // Array index assignment
         if let ObjectInternal::Array(ref mut elements) = self.internal {
             if let Ok(idx) = name.parse::<usize>() {
+                if idx >= elements.len() && !self.extensible {
+                    return false;
+                }
                 if idx >= elements.len() {
                     elements.resize(idx + 1, JsValue::Undefined);
                 }
@@ -571,10 +634,14 @@ impl JsObject {
                     "length".to_string(),
                     Property::data(JsValue::Number(elements.len() as f64)),
                 );
-                return;
+                return true;
             }
         }
+        if !self.extensible && !self.properties.contains_key(&name) {
+            return false;
+        }
         self.properties.insert(name, Property::data(value));
+        true
     }
 
     /// Get a symbol-keyed property, walking the prototype chain.
@@ -750,6 +817,9 @@ impl fmt::Display for JsObject {
         match &self.internal {
             ObjectInternal::Function(func) => {
                 write!(f, "[Function: {}]", func.name)
+            }
+            ObjectInternal::StringObject(value) => {
+                write!(f, "{}", value)
             }
             ObjectInternal::Array(elements) => {
                 write!(f, "[")?;
@@ -974,6 +1044,14 @@ mod tests {
         let prop = obj.properties.get("x").unwrap();
         assert!(!prop.writable);
         assert!(!prop.configurable);
+    }
+
+    #[test]
+    fn test_non_extensible_object_rejects_new_property() {
+        let mut obj = JsObject::ordinary();
+        obj.extensible = false;
+        assert!(!obj.try_set_property("x".to_string(), JsValue::Number(1.0)));
+        assert!(obj.get_property("x").is_undefined());
     }
 
     #[test]

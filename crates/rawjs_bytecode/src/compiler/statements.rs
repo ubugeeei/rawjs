@@ -52,17 +52,27 @@ impl Compiler {
     pub(crate) fn compile_variable_declaration(&mut self, vd: &VariableDeclaration) -> Result<()> {
         let is_using = matches!(vd.kind, VarKind::Using | VarKind::AwaitUsing);
         let is_await_using = vd.kind == VarKind::AwaitUsing;
+        let is_top_level_var = !self.in_function && self.scope_depth == 0 && vd.kind == VarKind::Var;
 
         for decl in &vd.declarations {
             match &decl.id {
                 Pattern::Identifier(id) => {
-                    let slot = self.declare_local(&id.name)?;
+                    let slot = if is_top_level_var {
+                        self.declare_global_alias_local(&id.name)?
+                    } else {
+                        self.declare_local(&id.name)?
+                    };
                     if let Some(ref init) = decl.init {
                         self.compile_expression(init)?;
                     } else {
                         self.emit(Instruction::Undefined);
                     }
                     self.emit(Instruction::StoreLocal(slot));
+                    if is_top_level_var {
+                        self.emit(Instruction::LoadLocal(slot));
+                        let idx = self.add_string_constant(&id.name)?;
+                        self.emit(Instruction::InitGlobal(idx));
+                    }
 
                     // Track `using` bindings for dispose on scope exit.
                     if is_using {
