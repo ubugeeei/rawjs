@@ -4,7 +4,13 @@ A JavaScript engine written in Rust. Hobby project.
 
 ## Why "raw"?
 
-The JIT compiler generates and executes aarch64 machine code directly in Rust — no external libraries, no dependencies.
+The JIT compiler generates and executes aarch64 machine code directly in Rust, with no external libraries or dependencies.
+
+## Targets
+
+- `aarch64`: interpreter + baseline JIT
+- `x86_64`: interpreter fallback
+- `riscv64`: interpreter fallback
 
 ## Usage
 
