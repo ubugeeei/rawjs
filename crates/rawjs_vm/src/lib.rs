@@ -1279,4 +1279,33 @@ mod tests {
         let result = vm.get_global("result").cloned().unwrap();
         assert_eq!(result, JsValue::Number(1.0));
     }
+
+    #[test]
+    fn test_execute_var_is_hoisted_before_initializer() {
+        let vm = execute_source(
+            r#"
+            result = x === undefined;
+            var x = true;
+            "#,
+        );
+        let result = vm.get_global("result").cloned().unwrap();
+        assert_eq!(result, JsValue::Boolean(true));
+    }
+
+    #[test]
+    fn test_execute_block_var_hoists_to_function_scope() {
+        let vm = execute_source(
+            r#"
+            function f() {
+              if (true) {
+                var answer = 42;
+              }
+              return answer;
+            }
+            result = f();
+            "#,
+        );
+        let result = vm.get_global("result").cloned().unwrap();
+        assert_eq!(result, JsValue::Number(42.0));
+    }
 }

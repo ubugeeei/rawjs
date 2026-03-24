@@ -869,12 +869,14 @@ fn compile_postfix_increment() {
         })),
     ]);
     let chunk = Compiler::compile_program(&prog).unwrap();
-    // Should have Dup (to save old value), Add, StoreLocal.
-    let has_dup = chunk
+    let has_postfix_increment = chunk
         .instructions
         .iter()
-        .any(|i| matches!(i, Instruction::Dup));
-    assert!(has_dup, "Postfix increment should Dup old value");
+        .any(|i| matches!(i, Instruction::PostfixIncrement));
+    assert!(
+        has_postfix_increment,
+        "Postfix increment should use the dedicated opcode"
+    );
 }
 
 #[test]

@@ -297,6 +297,8 @@ impl Compiler {
             child.declare_local(&param_name)?;
         }
 
+        child.hoist_var_declarations(&func.body.body)?;
+
         // Hoist function declarations inside the body.
         for stmt in &func.body.body {
             if let Statement::FunctionDeclaration(inner_func) = stmt {

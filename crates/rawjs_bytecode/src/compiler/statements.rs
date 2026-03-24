@@ -3,7 +3,7 @@ use rawjs_common::{RawJsError, Result};
 
 use crate::opcode::Instruction;
 
-use super::{expression_to_property_name, Compiler};
+use super::{expression_to_property_name, Compiler, LocalStorage};
 
 impl Compiler {
     // ------------------------------------------------------------------
@@ -57,10 +57,18 @@ impl Compiler {
         for decl in &vd.declarations {
             match &decl.id {
                 Pattern::Identifier(id) => {
-                    let slot = if is_top_level_var {
-                        self.declare_global_alias_local(&id.name)?
+                    let (slot, storage) = if vd.kind == VarKind::Var {
+                        if let Some((slot, storage)) = self.resolve_local_storage(&id.name) {
+                            (slot, storage)
+                        } else if is_top_level_var {
+                            (self.declare_global_alias_local(&id.name)?, LocalStorage::GlobalAlias)
+                        } else {
+                            (self.declare_local(&id.name)?, LocalStorage::Local)
+                        }
+                    } else if is_top_level_var {
+                        (self.declare_global_alias_local(&id.name)?, LocalStorage::GlobalAlias)
                     } else {
-                        self.declare_local(&id.name)?
+                        (self.declare_local(&id.name)?, LocalStorage::Local)
                     };
                     if let Some(ref init) = decl.init {
                         self.compile_expression(init)?;
@@ -68,7 +76,7 @@ impl Compiler {
                         self.emit(Instruction::Undefined);
                     }
                     self.emit(Instruction::StoreLocal(slot));
-                    if is_top_level_var {
+                    if storage == LocalStorage::GlobalAlias {
                         self.emit(Instruction::LoadLocal(slot));
                         let idx = self.add_string_constant(&id.name)?;
                         self.emit(Instruction::InitGlobal(idx));

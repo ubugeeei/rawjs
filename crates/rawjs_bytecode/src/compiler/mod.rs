@@ -115,6 +115,8 @@ impl Compiler {
         compiler.is_strict = has_use_strict_directive(&program.body);
         compiler.chunk.is_strict = compiler.is_strict;
 
+        compiler.hoist_var_declarations(&program.body)?;
+
         // Hoist import declarations to the top (ESM semantics).
         for stmt in &program.body {
             if let Statement::ImportDeclaration(import_decl) = stmt {
@@ -368,6 +370,127 @@ impl Compiler {
                 self.emit(Instruction::InitGlobal(idx));
             }
             self.emit(Instruction::Pop);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn hoist_var_declarations(&mut self, statements: &[Statement]) -> Result<()> {
+        for stmt in statements {
+            self.hoist_var_declarations_in_statement(stmt)?;
+        }
+        Ok(())
+    }
+
+    fn hoist_var_declarations_in_statement(&mut self, stmt: &Statement) -> Result<()> {
+        match stmt {
+            Statement::VariableDeclaration(vd) if vd.kind == VarKind::Var => {
+                for decl in &vd.declarations {
+                    self.hoist_var_pattern(&decl.id)?;
+                }
+            }
+            Statement::Block(block) => self.hoist_var_declarations(&block.body)?,
+            Statement::If(if_stmt) => {
+                self.hoist_var_declarations_in_statement(&if_stmt.consequent)?;
+                if let Some(alternate) = &if_stmt.alternate {
+                    self.hoist_var_declarations_in_statement(alternate)?;
+                }
+            }
+            Statement::While(while_stmt) => {
+                self.hoist_var_declarations_in_statement(&while_stmt.body)?;
+            }
+            Statement::DoWhile(do_while) => {
+                self.hoist_var_declarations_in_statement(&do_while.body)?;
+            }
+            Statement::For(for_stmt) => {
+                if let Some(ForInit::VariableDeclaration(vd)) = &for_stmt.init {
+                    if vd.kind == VarKind::Var {
+                        for decl in &vd.declarations {
+                            self.hoist_var_pattern(&decl.id)?;
+                        }
+                    }
+                }
+                self.hoist_var_declarations_in_statement(&for_stmt.body)?;
+            }
+            Statement::ForIn(for_in) => {
+                if let ForInOfLeft::VariableDeclaration(vd) = &for_in.left {
+                    if vd.kind == VarKind::Var {
+                        for decl in &vd.declarations {
+                            self.hoist_var_pattern(&decl.id)?;
+                        }
+                    }
+                }
+                self.hoist_var_declarations_in_statement(&for_in.body)?;
+            }
+            Statement::ForOf(for_of) => {
+                if let ForInOfLeft::VariableDeclaration(vd) = &for_of.left {
+                    if vd.kind == VarKind::Var {
+                        for decl in &vd.declarations {
+                            self.hoist_var_pattern(&decl.id)?;
+                        }
+                    }
+                }
+                self.hoist_var_declarations_in_statement(&for_of.body)?;
+            }
+            Statement::Switch(sw) => {
+                for case in &sw.cases {
+                    self.hoist_var_declarations(&case.consequent)?;
+                }
+            }
+            Statement::Try(try_stmt) => {
+                self.hoist_var_declarations(&try_stmt.block.body)?;
+                if let Some(handler) = &try_stmt.handler {
+                    self.hoist_var_declarations(&handler.body.body)?;
+                }
+                if let Some(finalizer) = &try_stmt.finalizer {
+                    self.hoist_var_declarations(&finalizer.body)?;
+                }
+            }
+            Statement::Labeled(labeled) => {
+                self.hoist_var_declarations_in_statement(&labeled.body)?;
+            }
+            Statement::ExportDeclaration(export_decl) => {
+                if let ExportKind::Declaration(inner) = &export_decl.kind {
+                    self.hoist_var_declarations_in_statement(inner)?;
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn hoist_var_pattern(&mut self, pattern: &Pattern) -> Result<()> {
+        match pattern {
+            Pattern::Identifier(id) => {
+                let slot = match self.resolve_local_storage(&id.name) {
+                    Some((slot, _)) => slot,
+                    None if !self.in_function && self.scope_depth == 0 => {
+                        self.declare_global_alias_local(&id.name)?
+                    }
+                    None => self.declare_local(&id.name)?,
+                };
+                self.emit(Instruction::Undefined);
+                self.emit(Instruction::StoreLocal(slot));
+                if !self.in_function && self.scope_depth == 0 {
+                    self.emit(Instruction::LoadLocal(slot));
+                    let idx = self.add_string_constant(&id.name)?;
+                    self.emit(Instruction::InitGlobal(idx));
+                }
+            }
+            Pattern::Array(array) => {
+                for element in &array.elements {
+                    if let Some(pattern) = element {
+                        self.hoist_var_pattern(pattern)?;
+                    }
+                }
+            }
+            Pattern::Object(object) => {
+                for property in &object.properties {
+                    self.hoist_var_pattern(&property.value)?;
+                }
+            }
+            Pattern::Assignment(assignment) => self.hoist_var_pattern(&assignment.left)?,
+            Pattern::Rest(rest) => self.hoist_var_pattern(&rest.argument)?,
         }
         Ok(())
     }
