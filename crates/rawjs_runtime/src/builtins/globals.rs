@@ -19,6 +19,7 @@ pub fn create_global_functions(heap: &mut Heap) -> Vec<(&'static str, GcPtr<JsOb
     global_fn!("parseFloat", global_parse_float);
     global_fn!("encodeURIComponent", global_encode_uri_component);
     global_fn!("decodeURIComponent", global_decode_uri_component);
+    global_fn!("eval", global_eval_placeholder);
     global_fn!("print", global_print);
 
     fns
@@ -211,6 +212,14 @@ fn global_print(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -> Result<J
         .collect();
     println!("{}", rendered.join(" "));
     Ok(JsValue::Undefined)
+}
+
+fn global_eval_placeholder(
+    _heap: &mut Heap,
+    _this: &JsValue,
+    _args: &[JsValue],
+) -> Result<JsValue> {
+    Err(RawJsError::type_error("eval dispatch was not intercepted"))
 }
 
 #[cfg(test)]

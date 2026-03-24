@@ -431,6 +431,12 @@ impl Compiler {
         // ++x / --x (prefix) or x++ / x-- (postfix)
         match update.argument.as_ref() {
             Expression::Identifier(id) => {
+                if self.is_strict && matches!(id.name.as_str(), "arguments" | "eval") {
+                    return Err(RawJsError::syntax_error(
+                        "Invalid update target in strict mode",
+                        None,
+                    ));
+                }
                 if update.prefix {
                     // Load, increment/decrement, store, result is new value.
                     self.compile_identifier_load(&id.name)?;
@@ -620,6 +626,12 @@ impl Compiler {
     fn compile_assignment(&mut self, assign: &AssignmentExpression) -> Result<()> {
         match assign.left.as_ref() {
             Expression::Identifier(id) => {
+                if self.is_strict && matches!(id.name.as_str(), "arguments" | "eval") {
+                    return Err(RawJsError::syntax_error(
+                        "Invalid assignment target in strict mode",
+                        None,
+                    ));
+                }
                 if assign.operator == AssignmentOp::Assign {
                     self.compile_expression(&assign.right)?;
                 } else {

@@ -17,6 +17,73 @@ FRONTMATTER_RE = re.compile(r"/\*---\n(.*?)\n---\*/", re.DOTALL)
 KEY_RE = re.compile(r"^([A-Za-z0-9_-]+):(?:\s*(.*))?$")
 
 RUNNER_SHIM = r"""
+if (typeof Function.prototype.call !== "function") {
+  Function.prototype.call = function(thisArg) {
+    var receiver = thisArg;
+    if (receiver === null || receiver === undefined) {
+      receiver = globalThis;
+    }
+    var key = "__rawjs_call__";
+    while (receiver[key] !== undefined) {
+      key += "_";
+    }
+    receiver[key] = this;
+    var result;
+    switch (arguments.length - 1) {
+      case 0: result = receiver[key](); break;
+      case 1: result = receiver[key](arguments[1]); break;
+      case 2: result = receiver[key](arguments[1], arguments[2]); break;
+      case 3: result = receiver[key](arguments[1], arguments[2], arguments[3]); break;
+      default: result = receiver[key](arguments[1], arguments[2], arguments[3], arguments[4]); break;
+    }
+    delete receiver[key];
+    return result;
+  };
+}
+
+if (typeof Function.prototype.bind !== "function") {
+  Function.prototype.bind = function(thisArg) {
+    var fn = this;
+    var boundArgs = [];
+    for (var i = 1; i < arguments.length; i++) {
+      boundArgs.push(arguments[i]);
+    }
+    return function() {
+      var callArgs = boundArgs.slice();
+      for (var i = 0; i < arguments.length; i++) {
+        callArgs.push(arguments[i]);
+      }
+      switch (callArgs.length) {
+        case 0: return fn.call(thisArg);
+        case 1: return fn.call(thisArg, callArgs[0]);
+        case 2: return fn.call(thisArg, callArgs[0], callArgs[1]);
+        case 3: return fn.call(thisArg, callArgs[0], callArgs[1], callArgs[2]);
+        default: return fn.call(thisArg, callArgs[0], callArgs[1], callArgs[2], callArgs[3]);
+      }
+    };
+  };
+}
+
+if (typeof Object.getOwnPropertyDescriptor !== "function") {
+  Object.getOwnPropertyDescriptor = function(obj, name) {
+    if (!Object.prototype.hasOwnProperty.call(obj, name)) {
+      return undefined;
+    }
+    return {
+      value: obj[name],
+      writable: true,
+      enumerable: Object.prototype.propertyIsEnumerable.call(obj, name),
+      configurable: true
+    };
+  };
+}
+
+if (typeof Object.getOwnPropertyNames !== "function") {
+  Object.getOwnPropertyNames = function(obj) {
+    return Object.keys(obj);
+  };
+}
+
 if (typeof Proxy === "undefined") {
   this.Proxy = function(target, handler) {
     if (handler && typeof handler.set === "function") {
@@ -214,6 +281,7 @@ def build_source(
         parts.append('"use strict";\n')
 
     if "raw" not in flags:
+        parts.append(RUNNER_SHIM)
         harness_names = ["sta.js", "assert.js"]
         if "async" in flags:
             harness_names.append("doneprintHandle.js")
@@ -222,7 +290,6 @@ def build_source(
         seen: set[str] = set()
         deduped = [name for name in harness_names if not (name in seen or seen.add(name))]
         parts.append(load_harness(test262_root, deduped))
-        parts.append(RUNNER_SHIM)
 
     parts.append(source)
     return "".join(parts)

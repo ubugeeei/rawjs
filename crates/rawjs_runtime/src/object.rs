@@ -239,6 +239,8 @@ impl IteratorState {
 pub enum ObjectInternal {
     /// A plain object with no special semantics.
     Ordinary,
+    /// An arguments object with optional parameter-to-index mappings.
+    ArgumentsObject(Vec<Option<u16>>),
     /// A boxed Boolean object created by `new Boolean(...)`.
     BooleanObject(bool),
     /// A function object. Holds the chunk index and captured upvalues.
@@ -864,6 +866,9 @@ impl JsObject {
 impl fmt::Display for JsObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.internal {
+            ObjectInternal::ArgumentsObject(_) => {
+                write!(f, "[object Arguments]")
+            }
             ObjectInternal::BooleanObject(value) => {
                 write!(f, "{}", value)
             }

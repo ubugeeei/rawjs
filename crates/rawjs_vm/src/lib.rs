@@ -43,6 +43,8 @@ pub(crate) struct CallFrame {
     pub locals: Vec<JsValue>,
     /// The full argument list for this call.
     pub arguments: Vec<JsValue>,
+    /// Lazily-created `arguments` object for this frame.
+    pub arguments_object: Option<GcPtr<JsObject>>,
     /// Whether this frame executes strict-mode code.
     pub is_strict: bool,
     /// Captured upvalues inherited from the closure.
@@ -551,6 +553,7 @@ impl Vm {
             base: self.value_stack.len(),
             locals: vec![JsValue::Undefined; local_count],
             arguments: Vec::new(),
+            arguments_object: None,
             is_strict: self.chunks[chunk_index].is_strict,
             upvalues: Vec::new(),
             this_value: self.global_this_value(),
@@ -733,6 +736,7 @@ impl Vm {
             base: self.value_stack.len(),
             locals: vec![JsValue::Undefined; local_count],
             arguments: Vec::new(),
+            arguments_object: None,
             is_strict: self.chunks[chunk_index].is_strict,
             upvalues: Vec::new(),
             this_value: self.global_this_value(),
@@ -1307,5 +1311,39 @@ mod tests {
         );
         let result = vm.get_global("result").cloned().unwrap();
         assert_eq!(result, JsValue::Number(42.0));
+    }
+
+    #[test]
+    fn test_execute_strict_eval_rejects_arguments_assignment() {
+        let vm = execute_source(
+            r#"
+            "use strict";
+            var result = false;
+            try {
+              (function fun() {
+                eval("arguments = 10");
+              })(30);
+            } catch (e) {
+              result = e.name === "SyntaxError";
+            }
+            "#,
+        );
+        let result = vm.get_global("result").cloned().unwrap();
+        assert_eq!(result, JsValue::Boolean(true));
+    }
+
+    #[test]
+    fn test_execute_arguments_object_persists_index_assignment() {
+        let vm = execute_source(
+            r#"
+            function f() {
+              arguments[7] = 12;
+              return arguments[7];
+            }
+            result = f(30);
+            "#,
+        );
+        let result = vm.get_global("result").cloned().unwrap();
+        assert_eq!(result, JsValue::Number(12.0));
     }
 }

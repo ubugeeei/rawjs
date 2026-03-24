@@ -52,6 +52,7 @@ fn object_to_string(_heap: &mut Heap, this: &JsValue, _args: &[JsValue]) -> Resu
             let o = obj.borrow();
             match &o.internal {
                 ObjectInternal::Array(_) => "Array",
+                ObjectInternal::ArgumentsObject(_) => "Arguments",
                 ObjectInternal::BooleanObject(_) => "Boolean",
                 ObjectInternal::Function(_) => "Function",
                 ObjectInternal::StringObject(_) => "String",

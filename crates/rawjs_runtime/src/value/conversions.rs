@@ -76,6 +76,7 @@ impl JsValue {
                             .collect();
                         parts.join(",")
                     }
+                    ObjectInternal::ArgumentsObject(_) => "[object Arguments]".to_string(),
                     ObjectInternal::BooleanObject(value) => value.to_string(),
                     ObjectInternal::Function(f) => {
                         format!("function {}() {{ [native code] }}", f.name)

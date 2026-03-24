@@ -8,6 +8,7 @@
 
 use rawjs_bytecode::{Chunk, Constant, Instruction};
 use rawjs_common::{RawJsError, Result};
+use rawjs_parser::parse as parse_program;
 use rawjs_runtime::{
     GeneratorState, GeneratorStatus, Heap, JsObject, JsValue, ObjectInternal, Property, Upvalue,
 };
@@ -242,6 +243,7 @@ fn drain_microtasks(vm: &mut Vm) -> Result<()> {
                                 base: vm.value_stack.len(),
                                 locals,
                                 arguments: vec![task.arg.clone()],
+                                arguments_object: None,
                                 is_strict: vm.chunks[chunk_index].is_strict,
                                 upvalues: func.upvalues.clone(),
                                 this_value: JsValue::Undefined,
@@ -399,12 +401,18 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
         }
         Instruction::StoreLocal(idx) => {
             let value = vm.pop()?;
-            let frame = vm.call_stack.last_mut().unwrap();
             let slot = idx as usize;
-            if slot >= frame.locals.len() {
-                frame.locals.resize(slot + 1, JsValue::Undefined);
+            let arguments_object = {
+                let frame = vm.call_stack.last_mut().unwrap();
+                if slot >= frame.locals.len() {
+                    frame.locals.resize(slot + 1, JsValue::Undefined);
+                }
+                frame.locals[slot] = value.clone();
+                frame.arguments_object.clone()
+            };
+            if let Some(arguments_obj) = arguments_object {
+                sync_arguments_object_from_local(arguments_obj, slot as u16, value);
             }
-            frame.locals[slot] = value;
         }
 
         // =================================================================
@@ -849,20 +857,61 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
             }
         }
         Instruction::LoadArguments => {
+            if let Some(arguments_obj) = vm
+                .call_stack
+                .last()
+                .and_then(|frame| frame.arguments_object.clone())
+            {
+                vm.push(JsValue::Object(arguments_obj));
+                return Ok(None);
+            }
+
             let args = vm
                 .call_stack
                 .last()
                 .map(|frame| frame.arguments.clone())
                 .unwrap_or_default();
+            let locals = vm
+                .call_stack
+                .last()
+                .map(|frame| frame.locals.clone())
+                .unwrap_or_default();
+            let is_strict = vm
+                .call_stack
+                .last()
+                .map(|frame| frame.is_strict)
+                .unwrap_or(false);
+            let param_count = vm
+                .call_stack
+                .last()
+                .map(|frame| vm.chunks[frame.chunk_index].param_count as usize)
+                .unwrap_or(0);
             let mut obj = JsObject::ordinary();
+            obj.internal = ObjectInternal::ArgumentsObject(
+                (0..args.len())
+                    .map(|index| {
+                        if !is_strict && index < param_count {
+                            Some(index as u16)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+            );
             obj.define_property(
                 "length".to_string(),
                 rawjs_runtime::Property::data(JsValue::Number(args.len() as f64)),
             );
             for (index, arg) in args.into_iter().enumerate() {
-                obj.set_property(index.to_string(), arg);
+                let value = if !is_strict && index < locals.len() && index < param_count {
+                    locals[index].clone()
+                } else {
+                    arg
+                };
+                obj.set_property(index.to_string(), value);
             }
             let arguments_obj = vm.heap.alloc(obj);
+            vm.call_stack.last_mut().unwrap().arguments_object = Some(arguments_obj.clone());
             vm.push(JsValue::Object(arguments_obj));
         }
 
@@ -1228,6 +1277,10 @@ pub(crate) fn exec_call(vm: &mut Vm, argc: usize, this_value: JsValue) -> Result
         return exec_promise_constructor(vm, &args);
     }
 
+    if is_eval_function(vm, &callee) {
+        return exec_eval(vm, &args);
+    }
+
     match &callee {
         JsValue::Object(ptr) => {
             let func = {
@@ -1297,6 +1350,7 @@ pub(crate) fn exec_call(vm: &mut Vm, argc: usize, this_value: JsValue) -> Result
                             base: vm.value_stack.len(),
                             locals,
                             arguments: args.clone(),
+                            arguments_object: None,
                             is_strict: vm.chunks[chunk_index].is_strict,
                             upvalues: func.upvalues.clone(),
                             this_value,
@@ -1403,6 +1457,7 @@ pub(crate) fn exec_new(vm: &mut Vm, argc: usize) -> Result<()> {
                         base: vm.value_stack.len(),
                         locals,
                         arguments: args.clone(),
+                        arguments_object: None,
                         is_strict: vm.chunks[chunk_index].is_strict,
                         upvalues: func.upvalues.clone(),
                         this_value: this_value.clone(),
@@ -1651,6 +1706,111 @@ fn is_promise_constructor(vm: &Vm, callee: &JsValue) -> bool {
         }
     }
     false
+}
+
+fn is_eval_function(vm: &Vm, callee: &JsValue) -> bool {
+    if let Some(global_eval) = vm.get_global("eval") {
+        if let (JsValue::Object(a), JsValue::Object(b)) = (callee, global_eval) {
+            return a.ptr_eq(b);
+        }
+    }
+    false
+}
+
+fn exec_eval(vm: &mut Vm, args: &[JsValue]) -> Result<()> {
+    let Some(source) = args.first() else {
+        vm.push(JsValue::Undefined);
+        return Ok(());
+    };
+
+    if !source.is_string() {
+        vm.push(source.clone());
+        return Ok(());
+    }
+
+    let mut eval_source = source.to_string_value();
+    if vm
+        .call_stack
+        .last()
+        .map(|frame| frame.is_strict)
+        .unwrap_or(false)
+    {
+        eval_source = format!("\"use strict\";\n{eval_source}");
+    }
+
+    let program =
+        parse_program(&eval_source).map_err(|err| RawJsError::syntax_error(format!("{err}"), None))?;
+    let chunk = rawjs_bytecode::compile(&program)
+        .map_err(|err| RawJsError::syntax_error(format!("{err}"), None))?;
+    let chunk_index = vm.add_chunk(chunk);
+    let local_count = vm.chunks[chunk_index].local_count as usize;
+
+    let frame = CallFrame {
+        chunk_index,
+        ip: 0,
+        base: vm.value_stack.len(),
+        locals: vec![JsValue::Undefined; local_count],
+        arguments: Vec::new(),
+        arguments_object: None,
+        is_strict: vm.chunks[chunk_index].is_strict,
+        upvalues: Vec::new(),
+        this_value: vm.global_this_value(),
+    };
+    vm.call_stack.push(frame);
+    Ok(())
+}
+
+fn sync_arguments_object_from_local(
+    arguments_obj: rawjs_runtime::GcPtr<JsObject>,
+    slot: u16,
+    value: JsValue,
+) {
+    let mapped_index = {
+        let obj = arguments_obj.borrow();
+        match &obj.internal {
+            ObjectInternal::ArgumentsObject(mapped_slots) => mapped_slots
+                .iter()
+                .position(|mapped_slot| *mapped_slot == Some(slot)),
+            _ => None,
+        }
+    };
+
+    if let Some(index) = mapped_index {
+        arguments_obj
+            .borrow_mut()
+            .set_property(index.to_string(), value);
+    }
+}
+
+fn sync_local_from_arguments_object(
+    vm: &mut Vm,
+    arguments_obj: &rawjs_runtime::GcPtr<JsObject>,
+    name: &str,
+    value: JsValue,
+) {
+    let Ok(index) = name.parse::<usize>() else {
+        return;
+    };
+
+    let mapped_slot = {
+        let obj = arguments_obj.borrow();
+        match &obj.internal {
+            ObjectInternal::ArgumentsObject(mapped_slots) => {
+                mapped_slots.get(index).copied().flatten()
+            }
+            _ => None,
+        }
+    };
+
+    if let Some(slot) = mapped_slot {
+        if let Some(frame) = vm.call_stack.last_mut() {
+            let slot = slot as usize;
+            if slot >= frame.locals.len() {
+                frame.locals.resize(slot + 1, JsValue::Undefined);
+            }
+            frame.locals[slot] = value;
+        }
+    }
 }
 
 /// Execute `new Promise(executor)` — creates a Promise, builds resolve/reject,
@@ -1986,6 +2146,9 @@ pub(crate) fn set_property_value(
             }
 
             let wrote = ptr.borrow_mut().try_set_property(name.to_string(), value.clone());
+            if wrote {
+                sync_local_from_arguments_object(vm, ptr, name, value.clone());
+            }
             if !wrote && is_strict {
                 return Err(RawJsError::type_error(format!(
                     "Cannot assign to property '{}'",
@@ -2251,6 +2414,7 @@ fn generator_next(
         base,
         locals,
         arguments,
+        arguments_object: None,
         is_strict: vm.chunks[chunk_index].is_strict,
         upvalues,
         this_value: JsValue::Object(gen_ptr.clone()),
@@ -2556,6 +2720,7 @@ fn async_resume(
         base,
         locals,
         arguments,
+        arguments_object: None,
         is_strict: vm.chunks[chunk_index].is_strict,
         upvalues,
         this_value: JsValue::Object(gen_ptr.clone()),
