@@ -127,6 +127,11 @@ pub fn create_object_constructor(heap: &mut Heap) -> GcPtr<JsObject> {
     set_native(&mut obj, "entries", object_entries);
     set_native(&mut obj, "assign", object_assign);
     set_native(&mut obj, "defineProperty", object_define_property);
+    set_native(
+        &mut obj,
+        "getOwnPropertyDescriptor",
+        object_get_own_property_descriptor,
+    );
     set_native(&mut obj, "freeze", object_freeze);
     set_native(&mut obj, "create", object_create);
     set_native(&mut obj, "getPrototypeOf", object_get_prototype_of);
@@ -237,10 +242,7 @@ fn object_define_property(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -
             ))
         }
     };
-    let key = args
-        .get(1)
-        .unwrap_or(&JsValue::Undefined)
-        .to_string_value();
+    let key = args.get(1).unwrap_or(&JsValue::Undefined).to_string_value();
     let descriptor = match args.get(2) {
         Some(JsValue::Object(ptr)) => ptr.clone(),
         _ => {
@@ -274,6 +276,59 @@ fn object_define_property(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -
 
     target.borrow_mut().define_property(key, prop);
     Ok(JsValue::Object(target))
+}
+
+fn object_get_own_property_descriptor(
+    heap: &mut Heap,
+    this: &JsValue,
+    args: &[JsValue],
+) -> Result<JsValue> {
+    let target = match args.first() {
+        Some(JsValue::Object(ptr)) => ptr.clone(),
+        _ => {
+            return Err(RawJsError::type_error(
+                "Object.getOwnPropertyDescriptor called on non-object",
+            ))
+        }
+    };
+    let key = args.get(1).unwrap_or(&JsValue::Undefined).to_string_value();
+
+    let Some(desc) = target.borrow().get_own_property_descriptor(&key) else {
+        return Ok(JsValue::Undefined);
+    };
+
+    let mut descriptor = JsObject::ordinary();
+    if let JsValue::Object(object_ctor) = this {
+        if let JsValue::Object(object_proto) = object_ctor.borrow().get_property("prototype") {
+            descriptor.prototype = Some(object_proto);
+        }
+    }
+    if let Some(getter) = desc.get {
+        descriptor.define_property("get".to_string(), crate::object::Property::data(getter));
+    }
+    if let Some(setter) = desc.set {
+        descriptor.define_property("set".to_string(), crate::object::Property::data(setter));
+    }
+    if descriptor.properties.is_empty() {
+        descriptor.define_property(
+            "value".to_string(),
+            crate::object::Property::data(desc.value),
+        );
+        descriptor.define_property(
+            "writable".to_string(),
+            crate::object::Property::data(JsValue::Boolean(desc.writable)),
+        );
+    }
+    descriptor.define_property(
+        "enumerable".to_string(),
+        crate::object::Property::data(JsValue::Boolean(desc.enumerable)),
+    );
+    descriptor.define_property(
+        "configurable".to_string(),
+        crate::object::Property::data(JsValue::Boolean(desc.configurable)),
+    );
+
+    Ok(JsValue::Object(heap.alloc(descriptor)))
 }
 
 fn object_freeze(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -> Result<JsValue> {
@@ -325,11 +380,7 @@ fn object_get_prototype_of(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) 
     })
 }
 
-fn object_set_prototype_of(
-    _heap: &mut Heap,
-    _this: &JsValue,
-    args: &[JsValue],
-) -> Result<JsValue> {
+fn object_set_prototype_of(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -> Result<JsValue> {
     let target = match args.first() {
         Some(JsValue::Object(ptr)) => ptr.clone(),
         _ => {
@@ -468,12 +519,41 @@ mod tests {
         let result = object_set_prototype_of(
             &mut heap,
             &JsValue::Undefined,
-            &[JsValue::Object(target.clone()), JsValue::Object(proto.clone())],
+            &[
+                JsValue::Object(target.clone()),
+                JsValue::Object(proto.clone()),
+            ],
         )
         .unwrap();
 
         assert_eq!(result, JsValue::Object(target.clone()));
         let actual_proto = target.borrow().prototype.clone().unwrap();
         assert!(actual_proto.ptr_eq(&proto));
+    }
+
+    #[test]
+    fn test_object_get_own_property_descriptor_builtin() {
+        let mut heap = Heap::new();
+        let target = heap.alloc(JsObject::ordinary());
+        target.borrow_mut().define_property(
+            "x".to_string(),
+            crate::object::Property::builtin(JsValue::Number(1.0)),
+        );
+
+        let result = object_get_own_property_descriptor(
+            &mut heap,
+            &JsValue::Undefined,
+            &[JsValue::Object(target), JsValue::string("x")],
+        )
+        .unwrap();
+
+        let JsValue::Object(desc) = result else {
+            panic!("expected descriptor object");
+        };
+        let desc = desc.borrow();
+        assert_eq!(desc.get_property("value"), JsValue::Number(1.0));
+        assert_eq!(desc.get_property("writable"), JsValue::Boolean(true));
+        assert_eq!(desc.get_property("enumerable"), JsValue::Boolean(false));
+        assert_eq!(desc.get_property("configurable"), JsValue::Boolean(true));
     }
 }

@@ -244,6 +244,7 @@ fn drain_microtasks(vm: &mut Vm) -> Result<()> {
                                 locals,
                                 arguments: vec![task.arg.clone()],
                                 arguments_object: None,
+                                callee: Some(fn_ptr.clone()),
                                 is_strict: vm.chunks[chunk_index].is_strict,
                                 upvalues: func.upvalues.clone(),
                                 this_value: JsValue::Undefined,
@@ -449,7 +450,9 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
                 .map(|frame| frame.is_strict)
                 .unwrap_or(false);
             if is_strict && vm.get_global(&name).is_none() {
-                return Err(RawJsError::reference_error(format!("{name} is not defined")));
+                return Err(RawJsError::reference_error(format!(
+                    "{name} is not defined"
+                )));
             }
             vm.set_global(name, value);
         }
@@ -881,6 +884,7 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
                 .last()
                 .map(|frame| frame.is_strict)
                 .unwrap_or(false);
+            let callee = vm.call_stack.last().and_then(|frame| frame.callee.clone());
             let param_count = vm
                 .call_stack
                 .last()
@@ -900,7 +904,7 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
             );
             obj.define_property(
                 "length".to_string(),
-                rawjs_runtime::Property::data(JsValue::Number(args.len() as f64)),
+                rawjs_runtime::Property::builtin(JsValue::Number(args.len() as f64)),
             );
             for (index, arg) in args.into_iter().enumerate() {
                 let value = if !is_strict && index < locals.len() && index < param_count {
@@ -909,6 +913,14 @@ fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue
                     arg
                 };
                 obj.set_property(index.to_string(), value);
+            }
+            if !is_strict {
+                if let Some(callee) = callee {
+                    obj.define_property(
+                        "callee".to_string(),
+                        rawjs_runtime::Property::builtin(JsValue::Object(callee)),
+                    );
+                }
             }
             let arguments_obj = vm.heap.alloc(obj);
             vm.call_stack.last_mut().unwrap().arguments_object = Some(arguments_obj.clone());
@@ -1351,6 +1363,7 @@ pub(crate) fn exec_call(vm: &mut Vm, argc: usize, this_value: JsValue) -> Result
                             locals,
                             arguments: args.clone(),
                             arguments_object: None,
+                            callee: Some(ptr.clone()),
                             is_strict: vm.chunks[chunk_index].is_strict,
                             upvalues: func.upvalues.clone(),
                             this_value,
@@ -1430,9 +1443,7 @@ pub(crate) fn exec_new(vm: &mut Vm, argc: usize) -> Result<()> {
                     let chunk_index = *chunk_index;
 
                     if vm.chunks[chunk_index].is_generator || vm.chunks[chunk_index].is_async {
-                        return Err(RawJsError::type_error(
-                            "function is not a constructor",
-                        ));
+                        return Err(RawJsError::type_error("function is not a constructor"));
                     }
 
                     let count = vm.bump_execution_count(chunk_index);
@@ -1458,6 +1469,7 @@ pub(crate) fn exec_new(vm: &mut Vm, argc: usize) -> Result<()> {
                         locals,
                         arguments: args.clone(),
                         arguments_object: None,
+                        callee: Some(ptr.clone()),
                         is_strict: vm.chunks[chunk_index].is_strict,
                         upvalues: func.upvalues.clone(),
                         this_value: this_value.clone(),
@@ -1738,8 +1750,8 @@ fn exec_eval(vm: &mut Vm, args: &[JsValue]) -> Result<()> {
         eval_source = format!("\"use strict\";\n{eval_source}");
     }
 
-    let program =
-        parse_program(&eval_source).map_err(|err| RawJsError::syntax_error(format!("{err}"), None))?;
+    let program = parse_program(&eval_source)
+        .map_err(|err| RawJsError::syntax_error(format!("{err}"), None))?;
     let chunk = rawjs_bytecode::compile(&program)
         .map_err(|err| RawJsError::syntax_error(format!("{err}"), None))?;
     let chunk_index = vm.add_chunk(chunk);
@@ -1752,6 +1764,7 @@ fn exec_eval(vm: &mut Vm, args: &[JsValue]) -> Result<()> {
         locals: vec![JsValue::Undefined; local_count],
         arguments: Vec::new(),
         arguments_object: None,
+        callee: None,
         is_strict: vm.chunks[chunk_index].is_strict,
         upvalues: Vec::new(),
         this_value: vm.global_this_value(),
@@ -2145,7 +2158,9 @@ pub(crate) fn set_property_value(
                 }
             }
 
-            let wrote = ptr.borrow_mut().try_set_property(name.to_string(), value.clone());
+            let wrote = ptr
+                .borrow_mut()
+                .try_set_property(name.to_string(), value.clone());
             if wrote {
                 sync_local_from_arguments_object(vm, ptr, name, value.clone());
             }
@@ -2415,6 +2430,7 @@ fn generator_next(
         locals,
         arguments,
         arguments_object: None,
+        callee: None,
         is_strict: vm.chunks[chunk_index].is_strict,
         upvalues,
         this_value: JsValue::Object(gen_ptr.clone()),
@@ -2721,6 +2737,7 @@ fn async_resume(
         locals,
         arguments,
         arguments_object: None,
+        callee: None,
         is_strict: vm.chunks[chunk_index].is_strict,
         upvalues,
         this_value: JsValue::Object(gen_ptr.clone()),

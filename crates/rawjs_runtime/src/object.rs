@@ -703,7 +703,19 @@ impl JsObject {
 
     /// Get an own property descriptor, if any.
     pub fn get_own_property_descriptor(&self, name: &str) -> Option<Property> {
-        self.properties.get(name).cloned()
+        if let Some(prop) = self.properties.get(name) {
+            return Some(prop.clone());
+        }
+
+        if let ObjectInternal::Array(ref elements) = self.internal {
+            if let Ok(idx) = name.parse::<usize>() {
+                if idx < elements.len() {
+                    return Some(Property::data(elements[idx].clone()));
+                }
+            }
+        }
+
+        None
     }
 
     /// Get a property descriptor, walking the prototype chain.

@@ -45,6 +45,8 @@ pub(crate) struct CallFrame {
     pub arguments: Vec<JsValue>,
     /// Lazily-created `arguments` object for this frame.
     pub arguments_object: Option<GcPtr<JsObject>>,
+    /// The function object being executed for this frame, when available.
+    pub callee: Option<GcPtr<JsObject>>,
     /// Whether this frame executes strict-mode code.
     pub is_strict: bool,
     /// Captured upvalues inherited from the closure.
@@ -702,6 +704,7 @@ impl Vm {
             locals: vec![JsValue::Undefined; local_count],
             arguments: Vec::new(),
             arguments_object: None,
+            callee: None,
             is_strict: self.chunks[chunk_index].is_strict,
             upvalues: Vec::new(),
             this_value: self.global_this_value(),
@@ -885,6 +888,7 @@ impl Vm {
             locals: vec![JsValue::Undefined; local_count],
             arguments: Vec::new(),
             arguments_object: None,
+            callee: None,
             is_strict: self.chunks[chunk_index].is_strict,
             upvalues: Vec::new(),
             this_value: self.global_this_value(),
@@ -1556,6 +1560,27 @@ mod tests {
             var argObj = (function () { return arguments; })(1);
             var desc = Object.getOwnPropertyDescriptor(argObj, "0");
             result = desc.value === 1 && desc.enumerable === true;
+            "#,
+        );
+        let result = vm.get_global("result").cloned().unwrap();
+        assert_eq!(result, JsValue::Boolean(true));
+    }
+
+    #[test]
+    fn test_execute_arguments_callee_descriptor() {
+        let vm = execute_source(
+            r#"
+            function testcase() {
+              var desc = Object.getOwnPropertyDescriptor(arguments, "callee");
+              result =
+                arguments.callee === testcase &&
+                desc.configurable === true &&
+                desc.enumerable === false &&
+                desc.writable === true &&
+                desc.hasOwnProperty("get") === false &&
+                desc.hasOwnProperty("set") === false;
+            }
+            testcase();
             "#,
         );
         let result = vm.get_global("result").cloned().unwrap();
