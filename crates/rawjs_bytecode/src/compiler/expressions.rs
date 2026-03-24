@@ -112,10 +112,10 @@ impl Compiler {
                     self.emit(Instruction::LoadGlobal(idx));
                 }
             }
-        } else if let Some(uv) = self.resolve_upvalue(name) {
-            self.emit(Instruction::LoadUpvalue(uv));
         } else if self.in_function && name == "arguments" {
             self.emit(Instruction::LoadArguments);
+        } else if let Some(uv) = self.resolve_upvalue(name) {
+            self.emit(Instruction::LoadUpvalue(uv));
         } else {
             let idx = self.add_string_constant(name)?;
             self.emit(Instruction::LoadGlobal(idx));
@@ -376,8 +376,8 @@ impl Compiler {
                 }
                 Expression::Identifier(id) => {
                     if self.resolve_local(&id.name).is_some()
-                        || self.resolve_upvalue(&id.name).is_some()
                         || (self.in_function && id.name == "arguments")
+                        || self.resolve_upvalue(&id.name).is_some()
                     {
                         self.emit(Instruction::False);
                     } else {
@@ -400,8 +400,8 @@ impl Compiler {
         if unary.operator == UnaryOp::Typeof {
             if let Expression::Identifier(id) = unary.argument.as_ref() {
                 if self.resolve_local(&id.name).is_some()
-                    || self.resolve_upvalue(&id.name).is_some()
                     || (self.in_function && id.name == "arguments")
+                    || self.resolve_upvalue(&id.name).is_some()
                 {
                     self.compile_identifier_load(&id.name)?;
                 } else {

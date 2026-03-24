@@ -1642,4 +1642,21 @@ mod tests {
         let result = vm.get_global("result").cloned().unwrap();
         assert_eq!(result, JsValue::Boolean(true));
     }
+
+    #[test]
+    fn test_execute_nested_function_uses_own_arguments_object() {
+        let vm = execute_source(
+            r#"
+            function testcase() {
+              var arguments = undefined;
+              (function () {
+                result = arguments.length;
+              })();
+            }
+            testcase();
+            "#,
+        );
+        let result = vm.get_global("result").cloned().unwrap();
+        assert_eq!(result, JsValue::Number(0.0));
+    }
 }
