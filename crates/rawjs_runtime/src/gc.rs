@@ -51,6 +51,11 @@ impl<T> GcPtr<T> {
     pub fn ptr_eq(&self, other: &GcPtr<T>) -> bool {
         Rc::ptr_eq(&self.inner, &other.inner)
     }
+
+    /// Return a stable address for identity-based maps and sets.
+    pub fn addr(&self) -> usize {
+        Rc::as_ptr(&self.inner) as usize
+    }
 }
 
 impl<T> Clone for GcPtr<T> {

@@ -8,11 +8,11 @@
 pub mod interpreter;
 pub mod jit;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rawjs_bytecode::Chunk;
 use rawjs_common::{RawJsError, Result};
-use rawjs_runtime::{GcPtr, Heap, JsObject, JsValue, Upvalue};
+use rawjs_runtime::{GcPtr, Heap, JsObject, JsValue, ObjectInternal, Property, Upvalue};
 
 use std::path::{Path, PathBuf};
 
@@ -247,9 +247,10 @@ impl Vm {
         let array_proto = builtins::create_array_prototype(&mut self.heap);
         array_proto.borrow_mut().prototype = Some(obj_proto.clone());
         self.array_prototype = Some(array_proto);
-        let array_ctor = self
-            .heap
-            .alloc(JsObject::native_function("Array", builtins::array_constructor));
+        let array_ctor = self.heap.alloc(JsObject::native_function(
+            "Array",
+            builtins::array_constructor,
+        ));
         {
             let mut ctor = array_ctor.borrow_mut();
             ctor.prototype = Some(function_proto.clone());
@@ -261,10 +262,9 @@ impl Vm {
             );
             ctor.define_property(
                 "isArray".to_string(),
-                rawjs_runtime::Property::builtin(JsValue::Object(
-                    self.heap
-                        .alloc(JsObject::native_function("isArray", builtins::array_is_array)),
-                )),
+                rawjs_runtime::Property::builtin(JsValue::Object(self.heap.alloc(
+                    JsObject::native_function("isArray", builtins::array_is_array),
+                ))),
             );
         }
         self.globals
@@ -274,9 +274,10 @@ impl Vm {
         let string_proto = builtins::create_string_prototype(&mut self.heap);
         string_proto.borrow_mut().prototype = Some(obj_proto.clone());
         self.string_prototype = Some(string_proto);
-        let string_ctor = self
-            .heap
-            .alloc(JsObject::native_function("String", builtins::string_constructor));
+        let string_ctor = self.heap.alloc(JsObject::native_function(
+            "String",
+            builtins::string_constructor,
+        ));
         {
             let mut ctor = string_ctor.borrow_mut();
             ctor.prototype = Some(function_proto.clone());
@@ -287,10 +288,14 @@ impl Vm {
                 )),
             );
         }
-        self.string_prototype.as_ref().unwrap().borrow_mut().define_property(
-            "constructor".to_string(),
-            rawjs_runtime::Property::builtin(JsValue::Object(string_ctor.clone())),
-        );
+        self.string_prototype
+            .as_ref()
+            .unwrap()
+            .borrow_mut()
+            .define_property(
+                "constructor".to_string(),
+                rawjs_runtime::Property::builtin(JsValue::Object(string_ctor.clone())),
+            );
         self.globals
             .insert("String".to_string(), JsValue::Object(string_ctor));
 
@@ -298,9 +303,10 @@ impl Vm {
         let boolean_proto = builtins::create_boolean_prototype(&mut self.heap);
         boolean_proto.borrow_mut().prototype = Some(obj_proto.clone());
         self.boolean_prototype = Some(boolean_proto);
-        let boolean_ctor = self
-            .heap
-            .alloc(JsObject::native_function("Boolean", builtins::boolean_constructor));
+        let boolean_ctor = self.heap.alloc(JsObject::native_function(
+            "Boolean",
+            builtins::boolean_constructor,
+        ));
         {
             let mut ctor = boolean_ctor.borrow_mut();
             ctor.prototype = Some(function_proto.clone());
@@ -326,9 +332,10 @@ impl Vm {
         let number_proto = builtins::create_number_prototype(&mut self.heap);
         number_proto.borrow_mut().prototype = Some(obj_proto.clone());
         self.number_prototype = Some(number_proto);
-        let number_ctor = self
-            .heap
-            .alloc(JsObject::native_function("Number", builtins::number_constructor));
+        let number_ctor = self.heap.alloc(JsObject::native_function(
+            "Number",
+            builtins::number_constructor,
+        ));
         {
             let mut ctor = number_ctor.borrow_mut();
             ctor.prototype = Some(function_proto.clone());
@@ -359,10 +366,14 @@ impl Vm {
                 rawjs_runtime::Property::readonly_builtin(JsValue::Number(f64::MIN_POSITIVE)),
             );
         }
-        self.number_prototype.as_ref().unwrap().borrow_mut().define_property(
-            "constructor".to_string(),
-            rawjs_runtime::Property::builtin(JsValue::Object(number_ctor.clone())),
-        );
+        self.number_prototype
+            .as_ref()
+            .unwrap()
+            .borrow_mut()
+            .define_property(
+                "constructor".to_string(),
+                rawjs_runtime::Property::builtin(JsValue::Object(number_ctor.clone())),
+            );
         self.globals
             .insert("Number".to_string(), JsValue::Object(number_ctor));
 
@@ -511,10 +522,147 @@ impl Vm {
         for (name, value) in self.globals.clone() {
             global_obj.borrow_mut().set_property(name, value);
         }
-        global_obj
-            .borrow_mut()
-            .set_property("globalThis".to_string(), JsValue::Object(global_obj.clone()));
+        global_obj.borrow_mut().set_property(
+            "globalThis".to_string(),
+            JsValue::Object(global_obj.clone()),
+        );
         self.global_object = Some(global_obj);
+        self.repair_builtin_function_prototypes();
+    }
+
+    fn repair_builtin_function_prototypes(&mut self) {
+        let Some(function_proto) = self.function_prototype.clone() else {
+            return;
+        };
+        let Some(object_proto) = self.object_prototype.clone() else {
+            return;
+        };
+
+        let mut visited = HashSet::new();
+        let mut roots: Vec<JsValue> = self.globals.values().cloned().collect();
+
+        for ptr in [
+            self.global_object.clone(),
+            self.array_prototype.clone(),
+            self.function_prototype.clone(),
+            self.string_prototype.clone(),
+            self.number_prototype.clone(),
+            self.boolean_prototype.clone(),
+            self.object_prototype.clone(),
+            self.symbol_prototype.clone(),
+            self.map_prototype.clone(),
+            self.set_prototype.clone(),
+            self.promise_prototype.clone(),
+            self.generator_prototype.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            roots.push(JsValue::Object(ptr));
+        }
+
+        for root in roots {
+            Self::repair_builtin_function_prototypes_in_value(
+                &root,
+                &function_proto,
+                &object_proto,
+                &mut visited,
+            );
+        }
+    }
+
+    fn repair_builtin_function_prototypes_in_value(
+        value: &JsValue,
+        function_proto: &GcPtr<JsObject>,
+        object_proto: &GcPtr<JsObject>,
+        visited: &mut HashSet<usize>,
+    ) {
+        if let JsValue::Object(ptr) = value {
+            Self::repair_builtin_function_prototypes_in_object(
+                ptr.clone(),
+                function_proto,
+                object_proto,
+                visited,
+            );
+        }
+    }
+
+    fn repair_builtin_function_prototypes_in_object(
+        ptr: GcPtr<JsObject>,
+        function_proto: &GcPtr<JsObject>,
+        object_proto: &GcPtr<JsObject>,
+        visited: &mut HashSet<usize>,
+    ) {
+        if !visited.insert(ptr.addr()) {
+            return;
+        }
+
+        let mut nested_values = Vec::new();
+        let mut constructor_target = None;
+
+        {
+            let mut obj = ptr.borrow_mut();
+
+            if matches!(&obj.internal, ObjectInternal::Function(_)) {
+                if obj.prototype.is_none() {
+                    obj.prototype = Some(function_proto.clone());
+                }
+
+                if let Some(prop) = obj.properties.get("prototype") {
+                    if let JsValue::Object(proto_obj) = &prop.value {
+                        constructor_target = Some(proto_obj.clone());
+                    }
+                }
+            }
+
+            if let Some(proto) = obj.prototype.clone() {
+                nested_values.push(JsValue::Object(proto));
+            }
+
+            for prop in obj.properties.values() {
+                nested_values.push(prop.value.clone());
+                if let Some(getter) = &prop.get {
+                    nested_values.push(getter.clone());
+                }
+                if let Some(setter) = &prop.set {
+                    nested_values.push(setter.clone());
+                }
+            }
+
+            for prop in obj.symbol_properties.values() {
+                nested_values.push(prop.value.clone());
+                if let Some(getter) = &prop.get {
+                    nested_values.push(getter.clone());
+                }
+                if let Some(setter) = &prop.set {
+                    nested_values.push(setter.clone());
+                }
+            }
+        }
+
+        if let Some(proto_obj) = constructor_target {
+            let needs_proto = proto_obj.borrow().prototype.is_none();
+            if needs_proto && !proto_obj.ptr_eq(object_proto) {
+                proto_obj.borrow_mut().prototype = Some(object_proto.clone());
+            }
+
+            let has_constructor = proto_obj.borrow().has_own_property("constructor");
+            if !has_constructor {
+                proto_obj.borrow_mut().define_property(
+                    "constructor".to_string(),
+                    Property::builtin(JsValue::Object(ptr.clone())),
+                );
+            }
+        }
+
+        for nested in nested_values {
+            Self::repair_builtin_function_prototypes_in_value(
+                &nested,
+                function_proto,
+                object_proto,
+                visited,
+            );
+        }
     }
 
     // -----------------------------------------------------------------
@@ -1345,5 +1493,72 @@ mod tests {
         );
         let result = vm.get_global("result").cloned().unwrap();
         assert_eq!(result, JsValue::Number(12.0));
+    }
+
+    #[test]
+    fn test_execute_native_methods_inherit_function_prototype_call() {
+        let vm = execute_source(
+            r#"
+            Function.prototype.call = function(thisArg) {
+              var receiver = thisArg;
+              if (receiver === null || receiver === undefined) {
+                receiver = globalThis;
+              }
+              var key = "__rawjs_call__";
+              while (receiver[key] !== undefined) {
+                key += "_";
+              }
+              receiver[key] = this;
+              var result = receiver[key](arguments[1]);
+              delete receiver[key];
+              return result;
+            };
+
+            var obj = { x: 1 };
+            result = Object.prototype.hasOwnProperty.call(obj, "x");
+            "#,
+        );
+        let result = vm.get_global("result").cloned().unwrap();
+        assert_eq!(result, JsValue::Boolean(true));
+    }
+
+    #[test]
+    fn test_execute_descriptor_shim_can_call_native_object_methods() {
+        let vm = execute_source(
+            r#"
+            Function.prototype.call = function(thisArg) {
+              var receiver = thisArg;
+              if (receiver === null || receiver === undefined) {
+                receiver = globalThis;
+              }
+              var key = "__rawjs_call__";
+              while (receiver[key] !== undefined) {
+                key += "_";
+              }
+              receiver[key] = this;
+              var result = receiver[key](arguments[1], arguments[2]);
+              delete receiver[key];
+              return result;
+            };
+
+            Object.getOwnPropertyDescriptor = function(obj, name) {
+              if (!Object.prototype.hasOwnProperty.call(obj, name)) {
+                return undefined;
+              }
+              return {
+                value: obj[name],
+                writable: true,
+                enumerable: Object.prototype.propertyIsEnumerable.call(obj, name),
+                configurable: true
+              };
+            };
+
+            var argObj = (function () { return arguments; })(1);
+            var desc = Object.getOwnPropertyDescriptor(argObj, "0");
+            result = desc.value === 1 && desc.enumerable === true;
+            "#,
+        );
+        let result = vm.get_global("result").cloned().unwrap();
+        assert_eq!(result, JsValue::Boolean(true));
     }
 }
