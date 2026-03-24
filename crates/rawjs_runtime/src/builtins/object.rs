@@ -52,6 +52,7 @@ fn object_to_string(_heap: &mut Heap, this: &JsValue, _args: &[JsValue]) -> Resu
             let o = obj.borrow();
             match &o.internal {
                 ObjectInternal::Array(_) => "Array",
+                ObjectInternal::BooleanObject(_) => "Boolean",
                 ObjectInternal::Function(_) => "Function",
                 ObjectInternal::StringObject(_) => "String",
                 ObjectInternal::Error(_) => "Error",
@@ -128,6 +129,7 @@ pub fn create_object_constructor(heap: &mut Heap) -> GcPtr<JsObject> {
     set_native(&mut obj, "freeze", object_freeze);
     set_native(&mut obj, "create", object_create);
     set_native(&mut obj, "getPrototypeOf", object_get_prototype_of);
+    set_native(&mut obj, "setPrototypeOf", object_set_prototype_of);
     set_native(&mut obj, "preventExtensions", object_prevent_extensions);
 
     heap.alloc(obj)
@@ -322,6 +324,34 @@ fn object_get_prototype_of(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) 
     })
 }
 
+fn object_set_prototype_of(
+    _heap: &mut Heap,
+    _this: &JsValue,
+    args: &[JsValue],
+) -> Result<JsValue> {
+    let target = match args.first() {
+        Some(JsValue::Object(ptr)) => ptr.clone(),
+        _ => {
+            return Err(RawJsError::type_error(
+                "Object.setPrototypeOf called on non-object",
+            ))
+        }
+    };
+
+    let prototype = match args.get(1) {
+        Some(JsValue::Object(ptr)) => Some(ptr.clone()),
+        Some(JsValue::Null) => None,
+        _ => {
+            return Err(RawJsError::type_error(
+                "Object prototype must be an object or null",
+            ))
+        }
+    };
+
+    target.borrow_mut().prototype = prototype;
+    Ok(JsValue::Object(target))
+}
+
 fn object_prevent_extensions(
     _heap: &mut Heap,
     _this: &JsValue,
@@ -426,5 +456,23 @@ mod tests {
         assert!(!target
             .borrow_mut()
             .try_set_property("x".to_string(), JsValue::Number(1.0)));
+    }
+
+    #[test]
+    fn test_object_set_prototype_of_builtin() {
+        let mut heap = Heap::new();
+        let target = heap.alloc(JsObject::ordinary());
+        let proto = heap.alloc(JsObject::ordinary());
+
+        let result = object_set_prototype_of(
+            &mut heap,
+            &JsValue::Undefined,
+            &[JsValue::Object(target.clone()), JsValue::Object(proto.clone())],
+        )
+        .unwrap();
+
+        assert_eq!(result, JsValue::Object(target.clone()));
+        let actual_proto = target.borrow().prototype.clone().unwrap();
+        assert!(actual_proto.ptr_eq(&proto));
     }
 }

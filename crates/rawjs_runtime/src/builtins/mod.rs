@@ -1,6 +1,7 @@
 mod helpers;
 
 pub mod array;
+pub mod boolean;
 pub mod console;
 pub mod error;
 pub mod function;
@@ -17,6 +18,7 @@ pub mod string;
 pub mod symbol;
 
 pub use array::{array_constructor, array_is_array, create_array_prototype};
+pub use boolean::{boolean_constructor, create_boolean_prototype};
 pub use console::create_console_object;
 pub use error::create_error_constructor;
 pub use function::{create_function_prototype, function_constructor_placeholder};

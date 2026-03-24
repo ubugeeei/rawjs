@@ -119,6 +119,7 @@ pub struct Vm {
     pub(crate) function_prototype: Option<GcPtr<JsObject>>,
     pub(crate) string_prototype: Option<GcPtr<JsObject>>,
     pub(crate) number_prototype: Option<GcPtr<JsObject>>,
+    pub(crate) boolean_prototype: Option<GcPtr<JsObject>>,
     pub(crate) object_prototype: Option<GcPtr<JsObject>>,
     pub(crate) symbol_prototype: Option<GcPtr<JsObject>>,
     pub(crate) map_prototype: Option<GcPtr<JsObject>>,
@@ -158,6 +159,7 @@ impl Vm {
             function_prototype: None,
             string_prototype: None,
             number_prototype: None,
+            boolean_prototype: None,
             object_prototype: None,
             symbol_prototype: None,
             map_prototype: None,
@@ -289,6 +291,34 @@ impl Vm {
         );
         self.globals
             .insert("String".to_string(), JsValue::Object(string_ctor));
+
+        // Boolean.prototype
+        let boolean_proto = builtins::create_boolean_prototype(&mut self.heap);
+        boolean_proto.borrow_mut().prototype = Some(obj_proto.clone());
+        self.boolean_prototype = Some(boolean_proto);
+        let boolean_ctor = self
+            .heap
+            .alloc(JsObject::native_function("Boolean", builtins::boolean_constructor));
+        {
+            let mut ctor = boolean_ctor.borrow_mut();
+            ctor.prototype = Some(function_proto.clone());
+            ctor.define_property(
+                "prototype".to_string(),
+                rawjs_runtime::Property::builtin(JsValue::Object(
+                    self.boolean_prototype.as_ref().unwrap().clone(),
+                )),
+            );
+        }
+        self.boolean_prototype
+            .as_ref()
+            .unwrap()
+            .borrow_mut()
+            .define_property(
+                "constructor".to_string(),
+                rawjs_runtime::Property::builtin(JsValue::Object(boolean_ctor.clone())),
+            );
+        self.globals
+            .insert("Boolean".to_string(), JsValue::Object(boolean_ctor));
 
         // Number.prototype
         let number_proto = builtins::create_number_prototype(&mut self.heap);
@@ -1208,5 +1238,45 @@ mod tests {
         );
         let result = vm.get_global("result").cloned().unwrap();
         assert_eq!(result, JsValue::Boolean(true));
+    }
+
+    #[test]
+    fn test_execute_boolean_primitive_uses_boolean_prototype() {
+        let vm = execute_source(
+            r#"
+            Boolean.prototype.answer = 42;
+            result = true.answer;
+            "#,
+        );
+        let result = vm.get_global("result").cloned().unwrap();
+        assert_eq!(result, JsValue::Number(42.0));
+    }
+
+    #[test]
+    fn test_execute_new_boolean_value_of() {
+        let vm = execute_source(
+            r#"
+            let boxed = new Boolean(false);
+            result = boxed.valueOf();
+            "#,
+        );
+        let result = vm.get_global("result").cloned().unwrap();
+        assert_eq!(result, JsValue::Boolean(false));
+    }
+
+    #[test]
+    fn test_execute_primitive_assignment_uses_boolean_setter() {
+        let vm = execute_source(
+            r#"
+            var count = 0;
+            Object.defineProperty(Boolean.prototype, "test262", {
+              set: function () { count += 1; }
+            });
+            true.test262 = null;
+            result = count;
+            "#,
+        );
+        let result = vm.get_global("result").cloned().unwrap();
+        assert_eq!(result, JsValue::Number(1.0));
     }
 }

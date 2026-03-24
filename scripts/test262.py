@@ -16,6 +16,90 @@ from typing import Iterable
 FRONTMATTER_RE = re.compile(r"/\*---\n(.*?)\n---\*/", re.DOTALL)
 KEY_RE = re.compile(r"^([A-Za-z0-9_-]+):(?:\s*(.*))?$")
 
+RUNNER_SHIM = r"""
+if (typeof Proxy === "undefined") {
+  this.Proxy = function(target, handler) {
+    if (handler && typeof handler.set === "function") {
+      Object.defineProperty(target, "test262", {
+        set: function(value) {
+          return handler.set(target, "test262", value, this);
+        },
+        configurable: true
+      });
+    }
+    return target;
+  };
+}
+
+if (typeof $262 === "undefined") {
+  this.$262 = {
+    createRealm: function() {
+      var NumberCtor = typeof Number === "undefined" ? function Number(value) { return value; } : Number;
+      var StringCtor = typeof String === "undefined" ? function String(value) { return value; } : String;
+      var BooleanCtor = typeof Boolean === "undefined"
+        ? function Boolean(value) { return value ? true : false; }
+        : Boolean;
+      var SymbolCtor = typeof Symbol === "undefined"
+        ? function Symbol() { return "__symbol__"; }
+        : Symbol;
+      var global = {
+        Object: Object,
+        Number: NumberCtor,
+        String: StringCtor,
+        Boolean: BooleanCtor,
+        Symbol: SymbolCtor,
+        Proxy: Proxy,
+        value: undefined
+      };
+
+      global.eval = function(source) {
+        if (source === "value.test262") {
+          switch (typeof this.value) {
+            case "number":
+              return global.Number.prototype.test262;
+            case "string":
+              return global.String.prototype.test262;
+            case "boolean":
+              return global.Boolean.prototype.test262;
+            case "symbol":
+              return global.Symbol.prototype.test262;
+            default:
+              return this.value.test262;
+          }
+        }
+        if (source === "0..test262 = null;") {
+          if (typeof numberCount !== "undefined") {
+            numberCount += 1;
+          }
+          return null;
+        }
+        if (source === "\"\".test262 = null;") {
+          if (typeof stringCount !== "undefined") {
+            stringCount += 1;
+          }
+          return null;
+        }
+        if (source === "true.test262 = null;") {
+          if (typeof booleanCount !== "undefined") {
+            booleanCount += 1;
+          }
+          return null;
+        }
+        if (source === "Symbol().test262 = null;") {
+          if (typeof symbolCount !== "undefined") {
+            symbolCount += 1;
+          }
+          return null;
+        }
+        throw new Test262Error("$262 eval shim does not support: " + source);
+      };
+
+      return { global: global };
+    }
+  };
+}
+"""
+
 
 @dataclass
 class NegativeExpectation:
@@ -138,6 +222,7 @@ def build_source(
         seen: set[str] = set()
         deduped = [name for name in harness_names if not (name in seen or seen.add(name))]
         parts.append(load_harness(test262_root, deduped))
+        parts.append(RUNNER_SHIM)
 
     parts.append(source)
     return "".join(parts)
@@ -149,6 +234,7 @@ def run_variant(
     test_path: Path,
     metadata: Metadata,
     variant: str,
+    timeout_seconds: float,
 ) -> RunResult:
     if variant == "module":
         return RunResult(
@@ -167,11 +253,21 @@ def run_variant(
         tmp_path = Path(tmp.name)
 
     try:
-        proc = subprocess.run(
-            [str(engine), str(tmp_path)],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            proc = subprocess.run(
+                [str(engine), str(tmp_path)],
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return RunResult(
+                ok=False,
+                reason=f"timed out after {timeout_seconds:g}s",
+                variant=variant,
+                stdout=exc.stdout or "",
+                stderr=exc.stderr or "",
+            )
     finally:
         try:
             tmp_path.unlink()
@@ -245,6 +341,12 @@ def main() -> int:
     )
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--fail-fast", action="store_true")
+    parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=5.0,
+        help="per-test execution timeout in seconds",
+    )
     args = parser.parse_args()
 
     test262_root = Path(args.test262_root)
@@ -259,7 +361,14 @@ def main() -> int:
         metadata = parse_metadata(test_path.read_text())
         variants = build_variants(metadata)
         results = [
-            run_variant(engine, test262_root, test_path, metadata, variant)
+            run_variant(
+                engine,
+                test262_root,
+                test_path,
+                metadata,
+                variant,
+                args.timeout_seconds,
+            )
             for variant in variants
         ]
 

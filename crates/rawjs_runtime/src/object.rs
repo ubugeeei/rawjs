@@ -239,6 +239,8 @@ impl IteratorState {
 pub enum ObjectInternal {
     /// A plain object with no special semantics.
     Ordinary,
+    /// A boxed Boolean object created by `new Boolean(...)`.
+    BooleanObject(bool),
     /// A function object. Holds the chunk index and captured upvalues.
     Function(FunctionObject),
     /// A boxed String object created by `new String(...)`.
@@ -862,6 +864,9 @@ impl JsObject {
 impl fmt::Display for JsObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.internal {
+            ObjectInternal::BooleanObject(value) => {
+                write!(f, "{}", value)
+            }
             ObjectInternal::Function(func) => {
                 write!(f, "[Function: {}]", func.name)
             }
