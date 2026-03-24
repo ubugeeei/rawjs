@@ -91,20 +91,10 @@ fn promise_then(heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> Result<JsV
                 }
             };
             if let Some(handler) = fulfill_handler {
-                // Store promise ID for the microtask to resolve result_promise
-                let id = heap.next_promise_id;
-                heap.next_promise_id += 1;
-                heap.promise_targets.insert(id, result_ptr.clone());
-                // Store the handler info on result_promise
-                result_ptr
-                    .borrow_mut()
-                    .set_property("__pending_handler__".to_string(), handler.clone());
-                result_ptr
-                    .borrow_mut()
-                    .set_property("__pending_id__".to_string(), JsValue::Number(id as f64));
                 heap.pending_microtasks.push(MicroTask {
                     callback: handler,
                     arg: value,
+                    target_promise: Some(result_ptr.clone()),
                 });
             } else {
                 // Identity: resolve result_promise with the same value
@@ -120,18 +110,10 @@ fn promise_then(heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> Result<JsV
                 }
             };
             if let Some(handler) = reject_handler {
-                let id = heap.next_promise_id;
-                heap.next_promise_id += 1;
-                heap.promise_targets.insert(id, result_ptr.clone());
-                result_ptr
-                    .borrow_mut()
-                    .set_property("__pending_handler__".to_string(), handler.clone());
-                result_ptr
-                    .borrow_mut()
-                    .set_property("__pending_id__".to_string(), JsValue::Number(id as f64));
                 heap.pending_microtasks.push(MicroTask {
                     callback: handler,
                     arg: value,
+                    target_promise: Some(result_ptr.clone()),
                 });
             } else {
                 // Identity: reject result_promise with the same reason
@@ -201,19 +183,9 @@ fn resolve_promise_impl(
                     h.pending_microtasks.push(MicroTask {
                         callback: handler.clone(),
                         arg: value.clone(),
+                        target_promise: Some(result_promise.clone()),
                     });
-                    // Store result_promise info for chaining.
-                    result_promise
-                        .borrow_mut()
-                        .set_property("__pending_handler__".to_string(), handler);
-                    result_promise
-                        .borrow_mut()
-                        .set_property("__pending_value__".to_string(), value.clone());
                 } else {
-                    // No heap: store handler info for the VM to use later.
-                    result_promise
-                        .borrow_mut()
-                        .set_property("__pending_handler__".to_string(), handler);
                     result_promise
                         .borrow_mut()
                         .set_property("__pending_value__".to_string(), value.clone());
@@ -261,17 +233,9 @@ fn reject_promise_impl(promise_ptr: &GcPtr<JsObject>, value: JsValue, mut heap: 
                     h.pending_microtasks.push(MicroTask {
                         callback: handler.clone(),
                         arg: value.clone(),
+                        target_promise: Some(result_promise.clone()),
                     });
-                    result_promise
-                        .borrow_mut()
-                        .set_property("__pending_handler__".to_string(), handler);
-                    result_promise
-                        .borrow_mut()
-                        .set_property("__pending_value__".to_string(), value.clone());
                 } else {
-                    result_promise
-                        .borrow_mut()
-                        .set_property("__pending_handler__".to_string(), handler);
                     result_promise
                         .borrow_mut()
                         .set_property("__pending_value__".to_string(), value.clone());
@@ -338,19 +302,10 @@ pub fn promise_resolve_fn(heap: &mut Heap, _this: &JsValue, args: &[JsValue]) ->
                 };
                 for reaction in reactions {
                     if let Some(handler) = reaction.handler {
-                        // Enqueue as microtask with result_promise info
-                        if let Some(result_promise) = &reaction.result_promise {
-                            let id = heap.next_promise_id;
-                            heap.next_promise_id += 1;
-                            heap.promise_targets.insert(id, result_promise.clone());
-                            result_promise.borrow_mut().set_property(
-                                "__pending_id__".to_string(),
-                                JsValue::Number(id as f64),
-                            );
-                        }
                         heap.pending_microtasks.push(MicroTask {
                             callback: handler,
                             arg: value.clone(),
+                            target_promise: reaction.result_promise.clone(),
                         });
                     } else if let Some(result_promise) = &reaction.result_promise {
                         resolve_promise_internal(result_promise, value.clone());
@@ -390,18 +345,10 @@ pub fn promise_reject_fn(heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -> 
                 };
                 for reaction in reactions {
                     if let Some(handler) = reaction.handler {
-                        if let Some(result_promise) = &reaction.result_promise {
-                            let id = heap.next_promise_id;
-                            heap.next_promise_id += 1;
-                            heap.promise_targets.insert(id, result_promise.clone());
-                            result_promise.borrow_mut().set_property(
-                                "__pending_id__".to_string(),
-                                JsValue::Number(id as f64),
-                            );
-                        }
                         heap.pending_microtasks.push(MicroTask {
                             callback: handler,
                             arg: reason.clone(),
+                            target_promise: reaction.result_promise.clone(),
                         });
                     } else if let Some(result_promise) = &reaction.result_promise {
                         reject_promise_internal(result_promise, reason.clone());

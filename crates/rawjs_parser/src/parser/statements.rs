@@ -708,18 +708,32 @@ impl Parser {
         };
 
         let mut kind = ClassMemberKind::Method;
-        if let TokenKind::Identifier(name) = self.peek() {
-            if name == "get" && !self.is_next_lparen() {
-                self.advance();
-                kind = ClassMemberKind::Get;
-            } else if name == "set" && !self.is_next_lparen() {
-                self.advance();
-                kind = ClassMemberKind::Set;
+        let is_async_method = self.is_async_method_start();
+        if is_async_method {
+            self.advance();
+        }
+        let is_generator = self.eat(&TokenKind::Star);
+
+        if !is_async_method && !is_generator {
+            if let TokenKind::Identifier(name) = self.peek() {
+                if name == "get" && !self.is_next_lparen() {
+                    self.advance();
+                    kind = ClassMemberKind::Get;
+                } else if name == "set" && !self.is_next_lparen() {
+                    self.advance();
+                    kind = ClassMemberKind::Set;
+                }
             }
         }
 
-        let computed = self.at(&TokenKind::LBracket);
-        let key = if computed {
+        let mut computed = self.at(&TokenKind::LBracket);
+        let key = if is_async_method && !is_generator && self.at(&TokenKind::LParen) {
+            computed = false;
+            Expression::Identifier(IdentifierExpression {
+                name: "async".to_string(),
+                location: loc,
+            })
+        } else if computed {
             self.advance();
             let k = self.parse_assignment_expression()?;
             self.expect(&TokenKind::RBracket)?;
@@ -729,24 +743,16 @@ impl Parser {
         };
 
         if let Expression::Identifier(ref id) = key {
-            if id.name == "constructor" {
+            if id.name == "constructor"
+                && kind == ClassMemberKind::Method
+                && !is_async_method
+                && !is_generator
+            {
                 kind = ClassMemberKind::Constructor;
             }
         }
 
-        self.expect(&TokenKind::LParen)?;
-        let params = self.parse_formal_parameters()?;
-        self.expect(&TokenKind::RParen)?;
-        let body = self.parse_block_statement()?;
-
-        let value = Expression::FunctionExpression(FunctionDeclaration {
-            id: None,
-            params,
-            body: Box::new(body),
-            is_async: false,
-            is_generator: false,
-            location: loc,
-        });
+        let value = self.parse_method_expression(loc, is_async_method, is_generator)?;
 
         Ok(ClassMember {
             key,

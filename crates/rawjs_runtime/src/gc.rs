@@ -11,6 +11,7 @@ use crate::value::JsValue;
 pub struct MicroTask {
     pub callback: JsValue,
     pub arg: JsValue,
+    pub target_promise: Option<GcPtr<JsObject>>,
 }
 
 /// A garbage-collected pointer.

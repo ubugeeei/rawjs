@@ -951,89 +951,91 @@ impl Parser {
 
             let prop_loc = self.location();
             let mut kind = PropertyKind::Init;
+            let is_async_method = self.is_async_method_start();
+            if is_async_method {
+                self.advance();
+            }
+            let is_generator = self.eat(&TokenKind::Star);
 
-            if let TokenKind::Identifier(name) = self.peek() {
-                if (name == "get" || name == "set") && !self.is_next_colon_or_lparen_or_comma() {
-                    let getter_setter = name.clone();
-                    self.advance();
-                    if self.at(&TokenKind::LParen)
-                        || self.at(&TokenKind::Colon)
-                        || self.at(&TokenKind::Comma)
-                        || self.at(&TokenKind::RBrace)
-                        || self.at(&TokenKind::Assign)
+            if !is_async_method && !is_generator {
+                if let TokenKind::Identifier(name) = self.peek() {
+                    if (name == "get" || name == "set") && !self.is_next_colon_or_lparen_or_comma()
                     {
-                        // Shorthand property named "get" or "set"
-                        let name_str = getter_setter;
-                        if self.eat(&TokenKind::Colon) {
-                            let value = self.parse_assignment_expression()?;
-                            properties.push(Property {
-                                key: Expression::Identifier(IdentifierExpression {
+                        let getter_setter = name.clone();
+                        self.advance();
+                        if self.at(&TokenKind::LParen)
+                            || self.at(&TokenKind::Colon)
+                            || self.at(&TokenKind::Comma)
+                            || self.at(&TokenKind::RBrace)
+                            || self.at(&TokenKind::Assign)
+                        {
+                            // Shorthand property named "get" or "set"
+                            let name_str = getter_setter;
+                            if self.eat(&TokenKind::Colon) {
+                                let value = self.parse_assignment_expression()?;
+                                properties.push(Property {
+                                    key: Expression::Identifier(IdentifierExpression {
+                                        name: name_str.clone(),
+                                        location: prop_loc,
+                                    }),
+                                    value,
+                                    kind: PropertyKind::Init,
+                                    computed: false,
+                                    shorthand: false,
+                                    location: prop_loc,
+                                });
+                            } else if self.at(&TokenKind::LParen) {
+                                let value = self.parse_method_expression(prop_loc, false, false)?;
+                                properties.push(Property {
+                                    key: Expression::Identifier(IdentifierExpression {
+                                        name: name_str.clone(),
+                                        location: prop_loc,
+                                    }),
+                                    value,
+                                    kind: PropertyKind::Init,
+                                    computed: false,
+                                    shorthand: false,
+                                    location: prop_loc,
+                                });
+                            } else {
+                                let value = Expression::Identifier(IdentifierExpression {
                                     name: name_str.clone(),
                                     location: prop_loc,
-                                }),
-                                value,
-                                kind: PropertyKind::Init,
-                                computed: false,
-                                shorthand: false,
-                                location: prop_loc,
-                            });
-                        } else if self.at(&TokenKind::LParen) {
-                            // Method shorthand: get() { ... }
-                            self.advance();
-                            let params = self.parse_formal_parameters()?;
-                            self.expect(&TokenKind::RParen)?;
-                            let body = self.parse_block_statement()?;
-                            let value = Expression::FunctionExpression(FunctionDeclaration {
-                                id: None,
-                                params,
-                                body: Box::new(body),
-                                is_async: false,
-                                is_generator: false,
-                                location: prop_loc,
-                            });
-                            properties.push(Property {
-                                key: Expression::Identifier(IdentifierExpression {
-                                    name: name_str.clone(),
+                                });
+                                properties.push(Property {
+                                    key: Expression::Identifier(IdentifierExpression {
+                                        name: name_str,
+                                        location: prop_loc,
+                                    }),
+                                    value,
+                                    kind: PropertyKind::Init,
+                                    computed: false,
+                                    shorthand: true,
                                     location: prop_loc,
-                                }),
-                                value,
-                                kind: PropertyKind::Init,
-                                computed: false,
-                                shorthand: false,
-                                location: prop_loc,
-                            });
+                                });
+                            }
+                            if !self.eat(&TokenKind::Comma) {
+                                break;
+                            }
+                            continue;
+                        }
+                        kind = if getter_setter == "get" {
+                            PropertyKind::Get
                         } else {
-                            let value = Expression::Identifier(IdentifierExpression {
-                                name: name_str.clone(),
-                                location: prop_loc,
-                            });
-                            properties.push(Property {
-                                key: Expression::Identifier(IdentifierExpression {
-                                    name: name_str,
-                                    location: prop_loc,
-                                }),
-                                value,
-                                kind: PropertyKind::Init,
-                                computed: false,
-                                shorthand: true,
-                                location: prop_loc,
-                            });
-                        }
-                        if !self.eat(&TokenKind::Comma) {
-                            break;
-                        }
-                        continue;
+                            PropertyKind::Set
+                        };
                     }
-                    kind = if getter_setter == "get" {
-                        PropertyKind::Get
-                    } else {
-                        PropertyKind::Set
-                    };
                 }
             }
 
-            let computed = self.at(&TokenKind::LBracket);
-            let key = if computed {
+            let mut computed = self.at(&TokenKind::LBracket);
+            let key = if is_async_method && !is_generator && self.at(&TokenKind::LParen) {
+                computed = false;
+                Expression::Identifier(IdentifierExpression {
+                    name: "async".to_string(),
+                    location: prop_loc,
+                })
+            } else if computed {
                 self.advance();
                 let k = self.parse_assignment_expression()?;
                 self.expect(&TokenKind::RBracket)?;
@@ -1043,19 +1045,7 @@ impl Parser {
             };
 
             if kind != PropertyKind::Init {
-                // getter/setter
-                self.expect(&TokenKind::LParen)?;
-                let params = self.parse_formal_parameters()?;
-                self.expect(&TokenKind::RParen)?;
-                let body = self.parse_block_statement()?;
-                let value = Expression::FunctionExpression(FunctionDeclaration {
-                    id: None,
-                    params,
-                    body: Box::new(body),
-                    is_async: false,
-                    is_generator: false,
-                    location: prop_loc,
-                });
+                let value = self.parse_method_expression(prop_loc, false, false)?;
                 properties.push(Property {
                     key,
                     value,
@@ -1064,20 +1054,9 @@ impl Parser {
                     shorthand: false,
                     location: prop_loc,
                 });
-            } else if self.at(&TokenKind::LParen) {
-                // method shorthand
-                self.advance();
-                let params = self.parse_formal_parameters()?;
-                self.expect(&TokenKind::RParen)?;
-                let body = self.parse_block_statement()?;
-                let value = Expression::FunctionExpression(FunctionDeclaration {
-                    id: None,
-                    params,
-                    body: Box::new(body),
-                    is_async: false,
-                    is_generator: false,
-                    location: prop_loc,
-                });
+            } else if is_async_method || is_generator || self.at(&TokenKind::LParen) {
+                let value =
+                    self.parse_method_expression(prop_loc, is_async_method, is_generator)?;
                 properties.push(Property {
                     key,
                     value,

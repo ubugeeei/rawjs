@@ -222,9 +222,9 @@ fn drain_microtasks(vm: &mut Vm) -> Result<()> {
                         rawjs_runtime::FunctionKind::Native(native_fn) => {
                             let native_fn = *native_fn;
                             vm.heap.calling_fn = Some(fn_ptr.clone());
-                            let result = native_fn(&mut vm.heap, &JsValue::Undefined, &[task.arg])?;
+                            let result = native_fn(&mut vm.heap, &JsValue::Undefined, &[task.arg]);
                             vm.heap.calling_fn = None;
-                            let _ = result;
+                            settle_microtask_target(vm, task.target_promise.clone(), result)?;
                         }
                         rawjs_runtime::FunctionKind::Bytecode { chunk_index } => {
                             let chunk_index = *chunk_index;
@@ -251,12 +251,45 @@ fn drain_microtasks(vm: &mut Vm) -> Result<()> {
                             };
                             vm.call_stack.push(frame);
 
-                            let result = run_microtask_frame(vm)?;
-                            let _ = result;
+                            let result = run_microtask_frame(vm);
+                            settle_microtask_target(vm, task.target_promise.clone(), result)?;
                         }
                     }
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+fn settle_microtask_target(
+    vm: &mut Vm,
+    target_promise: Option<rawjs_runtime::GcPtr<JsObject>>,
+    result: Result<JsValue>,
+) -> Result<()> {
+    let Some(target_promise) = target_promise else {
+        let _ = result?;
+        return Ok(());
+    };
+
+    match result {
+        Ok(value) => {
+            rawjs_runtime::builtins::resolve_promise_with_heap(
+                &target_promise,
+                value,
+                &mut vm.heap,
+            );
+        }
+        Err(err) => {
+            let reason = vm
+                .thrown_value
+                .take()
+                .unwrap_or_else(|| JsValue::string(err.message.as_str()));
+            rawjs_runtime::builtins::reject_promise_with_heap(
+                &target_promise,
+                reason,
+                &mut vm.heap,
+            );
         }
     }
     Ok(())
@@ -1328,8 +1361,20 @@ pub(crate) fn exec_call(vm: &mut Vm, argc: usize, this_value: JsValue) -> Result
                     rawjs_runtime::FunctionKind::Bytecode { chunk_index } => {
                         let chunk_index = *chunk_index;
 
+                        // Async generators produce a generator object whose
+                        // .next() returns Promises, not a Promise directly.
+                        if vm.chunks[chunk_index].is_generator && vm.chunks[chunk_index].is_async {
+                            return exec_create_async_generator(
+                                vm,
+                                chunk_index,
+                                &args,
+                                func.upvalues.clone(),
+                                this_value,
+                            );
+                        }
+
                         // Check if this is a generator function.
-                        if vm.chunks[chunk_index].is_generator && !vm.chunks[chunk_index].is_async {
+                        if vm.chunks[chunk_index].is_generator {
                             return exec_create_generator(
                                 vm,
                                 chunk_index,
@@ -2298,6 +2343,31 @@ fn exec_create_generator(
     Ok(())
 }
 
+fn exec_create_async_generator(
+    vm: &mut Vm,
+    chunk_index: usize,
+    args: &[JsValue],
+    upvalues: Vec<Upvalue>,
+    this_value: JsValue,
+) -> Result<()> {
+    exec_create_generator(vm, chunk_index, args, upvalues, this_value)
+}
+
+fn alloc_promise(vm: &mut Vm) -> rawjs_runtime::GcPtr<JsObject> {
+    let promise_ptr = vm.heap.alloc(JsObject::promise());
+    if let Some(ref proto) = vm.promise_prototype {
+        promise_ptr.borrow_mut().prototype = Some(proto.clone());
+    }
+    promise_ptr
+}
+
+fn clear_generator_result_promise(gen_ptr: &rawjs_runtime::GcPtr<JsObject>) {
+    let mut gen_obj = gen_ptr.borrow_mut();
+    if let ObjectInternal::Generator(ref mut state) = gen_obj.internal {
+        state.result_promise = None;
+    }
+}
+
 /// Execute a `Yield` instruction.
 ///
 /// Saves the current frame state into the generator's `GeneratorState`,
@@ -2364,6 +2434,14 @@ fn try_generator_method_call(
         _ => return Ok(None),
     };
 
+    let is_async_generator = {
+        let gen_obj = gen_ptr.borrow();
+        match &gen_obj.internal {
+            ObjectInternal::Generator(state) => vm.chunks[state.chunk_index].is_async,
+            _ => false,
+        }
+    };
+
     // Check if method is a native function from the generator prototype.
     let method_name = match method {
         JsValue::Object(ptr) => {
@@ -2380,17 +2458,29 @@ fn try_generator_method_call(
     match method_name.as_str() {
         "next" => {
             let arg = args.first().cloned().unwrap_or(JsValue::Undefined);
-            let result = generator_next(vm, &gen_ptr, arg)?;
+            let result = if is_async_generator {
+                async_generator_next(vm, &gen_ptr, arg)?
+            } else {
+                generator_next(vm, &gen_ptr, arg)?
+            };
             Ok(Some(result))
         }
         "return" => {
             let arg = args.first().cloned().unwrap_or(JsValue::Undefined);
-            let result = generator_return(&gen_ptr, vm, arg);
+            let result = if is_async_generator {
+                async_generator_return(vm, &gen_ptr, arg)
+            } else {
+                generator_return(&gen_ptr, vm, arg)
+            };
             Ok(Some(result))
         }
         "throw" => {
             let arg = args.first().cloned().unwrap_or(JsValue::Undefined);
-            let result = generator_throw(vm, &gen_ptr, arg)?;
+            let result = if is_async_generator {
+                async_generator_throw(vm, &gen_ptr, arg)
+            } else {
+                generator_throw(vm, &gen_ptr, arg)?
+            };
             Ok(Some(result))
         }
         _ => Ok(None),
@@ -2499,9 +2589,15 @@ fn run_generator_frame(vm: &mut Vm, target_depth: usize) -> Result<JsValue> {
         let frame_idx = vm.call_stack.len() - 1;
         let chunk_index = vm.call_stack[frame_idx].chunk_index;
         let ip = vm.call_stack[frame_idx].ip;
+        let is_target_frame = vm.call_stack.len() == target_depth + 1;
 
         let instr_count = vm.chunks[chunk_index].instructions.len();
         if ip >= instr_count {
+            if !is_target_frame {
+                let implicit_return = finish_frame_return(vm, JsValue::Undefined);
+                vm.push(implicit_return);
+                continue;
+            }
             // Implicit return undefined — generator is done.
             let frame = vm.call_stack.pop().unwrap();
             vm.value_stack.truncate(frame.base);
@@ -2522,6 +2618,20 @@ fn run_generator_frame(vm: &mut Vm, target_depth: usize) -> Result<JsValue> {
 
         match instruction {
             Instruction::Return => {
+                if !is_target_frame {
+                    match execute_instruction(vm, instruction) {
+                        Ok(Some(value)) => {
+                            vm.push(value);
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            if !unwind_exception(vm, &err)? {
+                                return Err(err);
+                            }
+                        }
+                    }
+                    continue;
+                }
                 // Generator return: pop return value, mark completed, return {value, done: true}
                 let return_value = if vm.value_stack.len() > vm.call_stack.last().unwrap().base {
                     vm.pop()?
@@ -2619,6 +2729,70 @@ fn generator_throw(
         }
         GeneratorStatus::Executing => Err(RawJsError::type_error("Generator is already executing")),
     }
+}
+
+fn async_generator_next(
+    vm: &mut Vm,
+    gen_ptr: &rawjs_runtime::GcPtr<JsObject>,
+    value: JsValue,
+) -> Result<JsValue> {
+    let saved_stack_len = vm.value_stack.len();
+    let status = {
+        let gen_obj = gen_ptr.borrow();
+        match &gen_obj.internal {
+            ObjectInternal::Generator(state) => state.status.clone(),
+            _ => return Err(RawJsError::type_error("not a generator")),
+        }
+    };
+
+    let promise_ptr = alloc_promise(vm);
+    if status == GeneratorStatus::Completed {
+        let result = make_iterator_result(vm, JsValue::Undefined, true);
+        rawjs_runtime::builtins::resolve_promise_with_heap(&promise_ptr, result, &mut vm.heap);
+        return Ok(JsValue::Object(promise_ptr));
+    }
+
+    {
+        let mut gen_obj = gen_ptr.borrow_mut();
+        if let ObjectInternal::Generator(ref mut state) = gen_obj.internal {
+            state.result_promise = Some(promise_ptr.clone());
+        }
+    }
+
+    if let Err(err) = async_resume(vm, gen_ptr, value, false) {
+        let reason = vm
+            .thrown_value
+            .take()
+            .unwrap_or_else(|| JsValue::string(err.message.as_str()));
+        clear_generator_result_promise(gen_ptr);
+        rawjs_runtime::builtins::reject_promise_with_heap(&promise_ptr, reason, &mut vm.heap);
+    }
+
+    vm.value_stack.truncate(saved_stack_len);
+    Ok(JsValue::Object(promise_ptr))
+}
+
+fn async_generator_return(
+    vm: &mut Vm,
+    gen_ptr: &rawjs_runtime::GcPtr<JsObject>,
+    value: JsValue,
+) -> JsValue {
+    let promise_ptr = alloc_promise(vm);
+    let result = generator_return(gen_ptr, vm, value);
+    clear_generator_result_promise(gen_ptr);
+    rawjs_runtime::builtins::resolve_promise_with_heap(&promise_ptr, result, &mut vm.heap);
+    JsValue::Object(promise_ptr)
+}
+
+fn async_generator_throw(
+    vm: &mut Vm,
+    gen_ptr: &rawjs_runtime::GcPtr<JsObject>,
+    error: JsValue,
+) -> JsValue {
+    let promise_ptr = alloc_promise(vm);
+    clear_generator_result_promise(gen_ptr);
+    rawjs_runtime::builtins::reject_promise_with_heap(&promise_ptr, error, &mut vm.heap);
+    JsValue::Object(promise_ptr)
 }
 
 /// Create a `{ value, done }` iterator result object.
@@ -2859,31 +3033,48 @@ fn run_async_frame(
     let try_stack_base = vm.try_stack.len();
     loop {
         if vm.call_stack.len() <= target_depth {
-            // Frame was popped (by exec_return or exec_await).
+            // Frame was popped by a yield-like operation.
+            if let Some(promise) = result_promise {
+                let result = vm.value_stack.pop().unwrap_or(JsValue::Undefined);
+                clear_generator_result_promise(gen_ptr);
+                rawjs_runtime::builtins::resolve_promise_with_heap(promise, result, &mut vm.heap);
+            }
             return Ok(());
         }
 
         let frame_idx = vm.call_stack.len() - 1;
         let chunk_index = vm.call_stack[frame_idx].chunk_index;
         let ip = vm.call_stack[frame_idx].ip;
+        let is_target_frame = vm.call_stack.len() == target_depth + 1;
 
         let instr_count = vm.chunks[chunk_index].instructions.len();
         if ip >= instr_count {
+            if !is_target_frame {
+                let implicit_return = finish_frame_return(vm, JsValue::Undefined);
+                vm.push(implicit_return);
+                continue;
+            }
             // Implicit return undefined — async function is done.
             let frame = vm.call_stack.pop().unwrap();
             vm.value_stack.truncate(frame.base);
+            let result_value = if vm.chunks[chunk_index].is_generator {
+                make_iterator_result(vm, JsValue::Undefined, true)
+            } else {
+                JsValue::Undefined
+            };
 
             // Mark generator as completed and resolve the promise.
             {
                 let mut gen_obj = gen_ptr.borrow_mut();
                 if let ObjectInternal::Generator(ref mut state) = gen_obj.internal {
                     state.status = GeneratorStatus::Completed;
+                    state.result_promise = None;
                 }
             }
             if let Some(ref promise) = result_promise {
                 rawjs_runtime::builtins::resolve_promise_with_heap(
                     promise,
-                    JsValue::Undefined,
+                    result_value,
                     &mut vm.heap,
                 );
             }
@@ -2895,11 +3086,30 @@ fn run_async_frame(
 
         match instruction {
             Instruction::Return => {
+                if !is_target_frame {
+                    match execute_instruction(vm, instruction) {
+                        Ok(Some(value)) => {
+                            vm.push(value);
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            if !unwind_exception(vm, &err)? {
+                                return Err(err);
+                            }
+                        }
+                    }
+                    continue;
+                }
                 // Async return: resolve the result promise.
                 let return_value = if vm.value_stack.len() > vm.call_stack.last().unwrap().base {
                     vm.pop()?
                 } else {
                     JsValue::Undefined
+                };
+                let result_value = if vm.chunks[chunk_index].is_generator {
+                    make_iterator_result(vm, return_value, true)
+                } else {
+                    return_value
                 };
 
                 let frame = vm.call_stack.pop().unwrap();
@@ -2910,6 +3120,7 @@ fn run_async_frame(
                     let mut gen_obj = gen_ptr.borrow_mut();
                     if let ObjectInternal::Generator(ref mut state) = gen_obj.internal {
                         state.status = GeneratorStatus::Completed;
+                        state.result_promise = None;
                     }
                 }
 
@@ -2917,7 +3128,7 @@ fn run_async_frame(
                 if let Some(ref promise) = result_promise {
                     rawjs_runtime::builtins::resolve_promise_with_heap(
                         promise,
-                        return_value,
+                        result_value,
                         &mut vm.heap,
                     );
                 }
@@ -2995,6 +3206,7 @@ fn run_async_frame(
                     vm.heap.pending_microtasks.push(rawjs_runtime::MicroTask {
                         callback: JsValue::Object(on_fulfilled),
                         arg: awaited_value,
+                        target_promise: None,
                     });
                 }
 

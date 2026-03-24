@@ -542,6 +542,119 @@ impl Parser {
         }
     }
 
+    fn is_property_name_token(kind: &TokenKind) -> bool {
+        matches!(
+            kind,
+            TokenKind::Identifier(_)
+                | TokenKind::String(_)
+                | TokenKind::Number(_)
+                | TokenKind::Boolean(_)
+                | TokenKind::Null
+                | TokenKind::Var
+                | TokenKind::Let
+                | TokenKind::Const
+                | TokenKind::Function
+                | TokenKind::Return
+                | TokenKind::If
+                | TokenKind::Else
+                | TokenKind::While
+                | TokenKind::For
+                | TokenKind::Do
+                | TokenKind::Break
+                | TokenKind::Continue
+                | TokenKind::Switch
+                | TokenKind::Case
+                | TokenKind::Default
+                | TokenKind::Throw
+                | TokenKind::Try
+                | TokenKind::Catch
+                | TokenKind::Finally
+                | TokenKind::New
+                | TokenKind::Delete
+                | TokenKind::Typeof
+                | TokenKind::Void
+                | TokenKind::In
+                | TokenKind::Instanceof
+                | TokenKind::This
+                | TokenKind::Class
+                | TokenKind::Extends
+                | TokenKind::Super
+                | TokenKind::Import
+                | TokenKind::Export
+                | TokenKind::Of
+                | TokenKind::With
+                | TokenKind::Debugger
+                | TokenKind::Yield
+                | TokenKind::Async
+                | TokenKind::Await
+        )
+    }
+
+    fn computed_property_end(&self, start: usize) -> Option<usize> {
+        let mut depth = 0;
+        let mut index = start;
+        while index < self.tokens.len() {
+            match self.tokens[index].kind {
+                TokenKind::LBracket => depth += 1,
+                TokenKind::RBracket => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(index + 1);
+                    }
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+        None
+    }
+
+    pub(crate) fn is_async_method_start(&self) -> bool {
+        let async_like = matches!(self.peek(), TokenKind::Async)
+            || matches!(self.peek(), TokenKind::Identifier(ref name) if name == "async");
+        if !async_like || self.pos + 1 >= self.tokens.len() {
+            return false;
+        }
+
+        let next = &self.tokens[self.pos + 1];
+        if next.had_line_break_before {
+            return false;
+        }
+
+        match &next.kind {
+            TokenKind::Star | TokenKind::LParen => true,
+            TokenKind::LBracket => self
+                .computed_property_end(self.pos + 1)
+                .and_then(|end| self.tokens.get(end))
+                .is_some_and(|token| token.kind == TokenKind::LParen),
+            kind if Self::is_property_name_token(kind) => self
+                .tokens
+                .get(self.pos + 2)
+                .is_some_and(|token| token.kind == TokenKind::LParen),
+            _ => false,
+        }
+    }
+
+    pub(crate) fn parse_method_expression(
+        &mut self,
+        location: SourceLocation,
+        is_async: bool,
+        is_generator: bool,
+    ) -> Result<Expression> {
+        self.expect(&TokenKind::LParen)?;
+        let params = self.parse_formal_parameters()?;
+        self.expect(&TokenKind::RParen)?;
+        let body = self.parse_block_statement()?;
+        Ok(Expression::FunctionExpression(FunctionDeclaration {
+            id: None,
+            params,
+            body: Box::new(body),
+            is_async,
+            is_generator,
+            location,
+        }))
+    }
+
     pub(crate) fn parse_property_name(&mut self) -> Result<Expression> {
         let loc = self.location();
         match self.peek().clone() {
@@ -633,6 +746,18 @@ mod tests {
     #[test]
     fn test_class() {
         let program = parse("class Foo extends Bar { constructor() {} method() {} }").unwrap();
+        assert_eq!(program.body.len(), 1);
+    }
+
+    #[test]
+    fn test_async_generator_object_method() {
+        let program = parse("({ async *method() {} });").unwrap();
+        assert_eq!(program.body.len(), 1);
+    }
+
+    #[test]
+    fn test_async_generator_class_method() {
+        let program = parse("class Foo { async *method() {} }").unwrap();
         assert_eq!(program.body.len(), 1);
     }
 
