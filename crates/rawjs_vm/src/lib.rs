@@ -4,7 +4,7 @@
 //! - A bytecode **interpreter** that executes `Chunk` programs from `rawjs_bytecode`.
 //! - An aarch64 **JIT compiler** (macOS Apple Silicon) that compiles hot functions
 //!   to native machine code.
-//! - Explicit `x86_64` and `riscv64` targets that currently use the interpreter fallback.
+//! - Matching `x86_64` and `riscv64` baseline JIT backends built around the same stub-call model.
 
 pub mod interpreter;
 pub mod jit;
@@ -74,8 +74,7 @@ pub(crate) struct TryContext {
 /// Owns the heap, all compiled chunks, and execution state (value stack,
 /// call stack, try stack).  The VM can execute bytecode through its
 /// interpreter and will automatically JIT-compile hot functions on
-/// aarch64-apple-darwin. Other configured targets currently use the
-/// interpreter fallback.
+/// supported `aarch64`, `x86_64`, and `riscv64` targets.
 pub struct Vm {
     /// The garbage-collected heap for object allocations.
     pub heap: Heap,

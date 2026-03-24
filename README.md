@@ -9,8 +9,8 @@ The JIT compiler generates and executes aarch64 machine code directly in Rust, w
 ## Targets
 
 - `aarch64`: interpreter + baseline JIT
-- `x86_64`: interpreter fallback
-- `riscv64`: interpreter fallback
+- `x86_64`: interpreter + baseline JIT
+- `riscv64`: interpreter + baseline JIT
 
 ## Usage
 

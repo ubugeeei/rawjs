@@ -1,8 +1,7 @@
 //! Stub-based baseline JIT compiler for the rawjs VM.
 //!
-//! Native code generation is currently implemented for `aarch64`.
-//! `x86_64` and `riscv64` are explicit targets in the build matrix, but
-//! still fall back to the interpreter until dedicated backends land.
+//! Native code generation is implemented for `aarch64`, `x86_64`, and
+//! `riscv64`, all using the same stub-call baseline strategy.
 
 pub mod stubs;
 
@@ -19,10 +18,10 @@ mod aarch64;
 ))]
 mod unsupported;
 
-#[cfg(target_arch = "x86_64")]
+#[allow(dead_code)]
 mod x86_64;
 
-#[cfg(target_arch = "riscv64")]
+#[allow(dead_code)]
 mod riscv64;
 
 #[cfg(target_arch = "aarch64")]
@@ -44,5 +43,12 @@ use unsupported as inner;
 pub use inner::JitCompiler;
 pub use inner::JitFunction;
 
-#[cfg(all(test, target_arch = "aarch64"))]
+#[cfg(all(
+    test,
+    any(
+        target_arch = "aarch64",
+        target_arch = "x86_64",
+        target_arch = "riscv64"
+    ),
+))]
 mod tests;
