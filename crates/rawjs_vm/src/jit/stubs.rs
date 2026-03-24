@@ -227,7 +227,7 @@ pub extern "C" fn stub_sub(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Number(lhs.to_number() - rhs.to_number()));
+    vm.push(lhs.sub(&rhs));
     0
 }
 
@@ -242,7 +242,7 @@ pub extern "C" fn stub_mul(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Number(lhs.to_number() * rhs.to_number()));
+    vm.push(lhs.mul(&rhs));
     0
 }
 
@@ -257,7 +257,7 @@ pub extern "C" fn stub_div(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Number(lhs.to_number() / rhs.to_number()));
+    vm.push(lhs.div(&rhs));
     0
 }
 
@@ -272,7 +272,7 @@ pub extern "C" fn stub_modulo(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Number(lhs.to_number() % rhs.to_number()));
+    vm.push(lhs.rem(&rhs));
     0
 }
 
@@ -287,7 +287,7 @@ pub extern "C" fn stub_exp(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Number(lhs.to_number().powf(rhs.to_number())));
+    vm.push(lhs.exp(&rhs));
     0
 }
 
@@ -298,7 +298,7 @@ pub extern "C" fn stub_neg(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Number(-val.to_number()));
+    vm.push(val.neg());
     0
 }
 
@@ -309,7 +309,7 @@ pub extern "C" fn stub_pos(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Number(val.to_number()));
+    vm.push(val.pos());
     0
 }
 
@@ -320,7 +320,7 @@ pub extern "C" fn stub_not(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Boolean(!val.to_boolean()));
+    vm.push(val.logical_not());
     0
 }
 
@@ -331,7 +331,7 @@ pub extern "C" fn stub_bit_not(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Number((!val.to_int32()) as f64));
+    vm.push(val.bitnot());
     0
 }
 
@@ -443,7 +443,7 @@ pub extern "C" fn stub_lt(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Boolean(lhs.to_number() < rhs.to_number()));
+    vm.push(lhs.lt(&rhs));
     0
 }
 
@@ -458,7 +458,7 @@ pub extern "C" fn stub_le(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Boolean(lhs.to_number() <= rhs.to_number()));
+    vm.push(lhs.le(&rhs));
     0
 }
 
@@ -473,7 +473,7 @@ pub extern "C" fn stub_gt(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Boolean(lhs.to_number() > rhs.to_number()));
+    vm.push(lhs.gt(&rhs));
     0
 }
 
@@ -488,7 +488,7 @@ pub extern "C" fn stub_ge(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Boolean(lhs.to_number() >= rhs.to_number()));
+    vm.push(lhs.ge(&rhs));
     0
 }
 
@@ -505,7 +505,7 @@ pub extern "C" fn stub_bit_and(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Number((lhs.to_int32() & rhs.to_int32()) as f64));
+    vm.push(lhs.bitand(&rhs));
     0
 }
 
@@ -520,7 +520,7 @@ pub extern "C" fn stub_bit_or(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Number((lhs.to_int32() | rhs.to_int32()) as f64));
+    vm.push(lhs.bitor(&rhs));
     0
 }
 
@@ -535,7 +535,7 @@ pub extern "C" fn stub_bit_xor(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Number((lhs.to_int32() ^ rhs.to_int32()) as f64));
+    vm.push(lhs.bitxor(&rhs));
     0
 }
 
@@ -550,8 +550,7 @@ pub extern "C" fn stub_shl(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    let shift = rhs.to_uint32() & 0x1f;
-    vm.push(JsValue::Number((lhs.to_int32() << shift) as f64));
+    vm.push(lhs.shl(&rhs));
     0
 }
 
@@ -566,8 +565,7 @@ pub extern "C" fn stub_shr(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    let shift = rhs.to_uint32() & 0x1f;
-    vm.push(JsValue::Number((lhs.to_int32() >> shift) as f64));
+    vm.push(lhs.shr(&rhs));
     0
 }
 
@@ -582,8 +580,7 @@ pub extern "C" fn stub_ushr(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    let shift = rhs.to_uint32() & 0x1f;
-    vm.push(JsValue::Number((lhs.to_uint32() >> shift) as f64));
+    vm.push(lhs.ushr(&rhs));
     0
 }
 
@@ -612,15 +609,15 @@ pub extern "C" fn stub_in(vm: *mut Vm) -> u32 {
 #[no_mangle]
 pub extern "C" fn stub_instanceof(vm: *mut Vm) -> u32 {
     let vm = vm_ref(vm);
-    let _rhs = match vm.pop() {
+    let rhs = match vm.pop() {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    let _lhs = match vm.pop() {
+    let lhs = match vm.pop() {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    vm.push(JsValue::Boolean(false));
+    vm.push(JsValue::Boolean(lhs.instance_of(&rhs)));
     0
 }
 
@@ -633,9 +630,10 @@ pub extern "C" fn stub_postfix_inc(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    let n = val.to_number();
-    vm.push(JsValue::Number(n));
-    vm.push(JsValue::Number(n + 1.0));
+    let old = val.pos(); // ToNumber
+    let new_val = old.increment();
+    vm.push(old);
+    vm.push(new_val);
     0
 }
 
@@ -646,9 +644,10 @@ pub extern "C" fn stub_postfix_dec(vm: *mut Vm) -> u32 {
         Ok(v) => v,
         Err(e) => return set_error(vm, e),
     };
-    let n = val.to_number();
-    vm.push(JsValue::Number(n));
-    vm.push(JsValue::Number(n - 1.0));
+    let old = val.pos(); // ToNumber
+    let new_val = old.decrement();
+    vm.push(old);
+    vm.push(new_val);
     0
 }
 

@@ -70,14 +70,15 @@ impl std::hash::Hash for JsSymbol {
 /// stored in variables.  Primitive types are stored inline; heap-allocated
 /// objects are behind a `GcPtr`.
 #[derive(Debug, Clone)]
+#[repr(C, u8)]
 pub enum JsValue {
-    Undefined,
-    Null,
-    Boolean(bool),
-    Number(f64),
-    String(Rc<str>),
-    Symbol(JsSymbol),
-    Object(GcPtr<JsObject>),
+    Undefined = 0,
+    Null = 1,
+    Boolean(bool) = 2,
+    Number(f64) = 3,
+    String(Rc<str>) = 4,
+    Symbol(JsSymbol) = 5,
+    Object(GcPtr<JsObject>) = 6,
 }
 
 // ---------------------------------------------------------------------------

@@ -52,7 +52,8 @@ impl Compiler {
     pub(crate) fn compile_variable_declaration(&mut self, vd: &VariableDeclaration) -> Result<()> {
         let is_using = matches!(vd.kind, VarKind::Using | VarKind::AwaitUsing);
         let is_await_using = vd.kind == VarKind::AwaitUsing;
-        let is_top_level_var = !self.in_function && self.scope_depth == 0 && vd.kind == VarKind::Var;
+        let is_top_level_var =
+            !self.in_function && self.scope_depth == 0 && vd.kind == VarKind::Var;
 
         for decl in &vd.declarations {
             match &decl.id {
@@ -61,12 +62,18 @@ impl Compiler {
                         if let Some((slot, storage)) = self.resolve_local_storage(&id.name) {
                             (slot, storage)
                         } else if is_top_level_var {
-                            (self.declare_global_alias_local(&id.name)?, LocalStorage::GlobalAlias)
+                            (
+                                self.declare_global_alias_local(&id.name)?,
+                                LocalStorage::GlobalAlias,
+                            )
                         } else {
                             (self.declare_local(&id.name)?, LocalStorage::Local)
                         }
                     } else if is_top_level_var {
-                        (self.declare_global_alias_local(&id.name)?, LocalStorage::GlobalAlias)
+                        (
+                            self.declare_global_alias_local(&id.name)?,
+                            LocalStorage::GlobalAlias,
+                        )
                     } else {
                         (self.declare_local(&id.name)?, LocalStorage::Local)
                     };
