@@ -113,11 +113,11 @@ mod tests {
         assert_eq!(
             number_to_fixed(
                 &mut heap,
-                &JsValue::Number(3.14159),
+                &JsValue::Number(2.34567),
                 &[JsValue::Number(2.0)]
             )
             .unwrap(),
-            JsValue::string("3.14")
+            JsValue::string("2.35")
         );
     }
 

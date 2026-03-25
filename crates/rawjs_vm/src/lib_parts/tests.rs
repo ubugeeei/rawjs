@@ -1,0 +1,19 @@
+#[cfg(test)]
+mod tests {
+    include!("tests/make_return_number_to_test_execute_comparison.rs");
+    include!("tests/test_execute_local_vars_to_dup_and_pop.rs");
+    include!("tests/test_execute_global_store_load_to_import_meta_url.rs");
+    include!("tests/test_execute_dynamic_import_to_logical_and_assignment_short_circuits.rs");
+    include!(
+        "tests/test_execute_logical_nullish_assignment_to_number_static_constants_are_read_only.rs"
+    );
+    include!(
+        "tests/test_execute_new_array_length_to_native_methods_inherit_function_prototype_call.rs"
+    );
+    include!(
+        "tests/test_execute_descriptor_shim_can_call_native_object_methods_to_nested_function_uses_own_arguments_object.rs"
+    );
+    include!(
+        "tests/test_execute_async_generator_method_next_resolves_to_generator_next_survives_nested_call.rs"
+    );
+}

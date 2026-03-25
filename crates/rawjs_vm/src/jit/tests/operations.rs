@@ -17,12 +17,12 @@ fn test_jit_return_zero_const() {
 #[test]
 fn test_jit_return_negative_const() {
     let mut chunk = Chunk::new("neg_const");
-    let idx = chunk.add_constant(Constant::Number(-3.14)).unwrap();
+    let idx = chunk.add_constant(Constant::Number(-2.5)).unwrap();
     chunk.emit(Instruction::LoadConst(idx));
     chunk.emit(Instruction::Return);
 
     let result = jit_execute_via_vm(chunk, &[]);
-    assert_eq!(result, JsValue::Number(-3.14));
+    assert_eq!(result, JsValue::Number(-2.5));
 }
 
 #[test]
