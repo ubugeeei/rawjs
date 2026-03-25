@@ -64,6 +64,15 @@ impl Compiler {
 impl Compiler {
     pub(super) fn compile_class_declaration(&mut self, cls: &ClassDeclaration) -> Result<()> {
         if let Some(ref name) = cls.id {
+            if self.is_repl_top_level_scope() {
+                let (slot, _) = self.declare_binding_with_storage(name, true)?;
+                self.compile_class_body(cls)?;
+                self.emit(Instruction::StoreLocal(slot));
+                self.emit(Instruction::LoadLocal(slot));
+                let idx = self.add_string_constant(name)?;
+                self.emit(Instruction::InitGlobal(idx));
+                return Ok(());
+            }
             let slot = self.declare_local(name)?;
             self.compile_class_body(cls)?;
             self.emit(Instruction::StoreLocal(slot));

@@ -1,4 +1,10 @@
 impl Compiler {
+    pub(crate) fn is_repl_top_level_scope(&self) -> bool {
+        self.persistent_top_level_bindings && !self.in_function && self.scope_depth == 0
+    }
+}
+
+impl Compiler {
     pub(crate) fn resolve_local_storage(&self, name: &str) -> Option<(u16, LocalStorage)> {
         self.resolve_local(name)
             .map(|slot| (slot, self.locals[slot as usize].storage))
@@ -50,6 +56,23 @@ impl Compiler {
         self.upvalues.push(desc);
         self.upvalue_names.push(name.to_string());
         idx
+    }
+}
+
+impl Compiler {
+    pub(crate) fn declare_binding_with_storage(
+        &mut self,
+        name: &str,
+        use_global_alias: bool,
+    ) -> Result<(u16, LocalStorage)> {
+        if use_global_alias {
+            Ok((
+                self.declare_global_alias_local(name)?,
+                LocalStorage::GlobalAlias,
+            ))
+        } else {
+            Ok((self.declare_local(name)?, LocalStorage::Local))
+        }
     }
 }
 

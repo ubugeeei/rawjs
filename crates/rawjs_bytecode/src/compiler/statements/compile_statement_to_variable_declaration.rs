@@ -50,8 +50,8 @@ impl Compiler {
     pub(crate) fn compile_variable_declaration(&mut self, vd: &VariableDeclaration) -> Result<()> {
         let is_using = matches!(vd.kind, VarKind::Using | VarKind::AwaitUsing);
         let is_await_using = vd.kind == VarKind::AwaitUsing;
-        let is_top_level_var =
-            !self.in_function && self.scope_depth == 0 && vd.kind == VarKind::Var;
+        let use_global_alias = self.is_repl_top_level_scope()
+            || (!self.in_function && self.scope_depth == 0 && vd.kind == VarKind::Var);
         if is_await_using && !self.is_async {
             return Err(RawJsError::syntax_error(
                 "'await using' is only valid in async functions and modules",
@@ -64,21 +64,11 @@ impl Compiler {
                     let (slot, storage) = if vd.kind == VarKind::Var {
                         if let Some((slot, storage)) = self.resolve_local_storage(&id.name) {
                             (slot, storage)
-                        } else if is_top_level_var {
-                            (
-                                self.declare_global_alias_local(&id.name)?,
-                                LocalStorage::GlobalAlias,
-                            )
                         } else {
-                            (self.declare_local(&id.name)?, LocalStorage::Local)
+                            self.declare_binding_with_storage(&id.name, use_global_alias)?
                         }
-                    } else if is_top_level_var {
-                        (
-                            self.declare_global_alias_local(&id.name)?,
-                            LocalStorage::GlobalAlias,
-                        )
                     } else {
-                        (self.declare_local(&id.name)?, LocalStorage::Local)
+                        self.declare_binding_with_storage(&id.name, use_global_alias)?
                     };
                     if let Some(ref init) = decl.init {
                         self.compile_expression(init)?;

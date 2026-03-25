@@ -29,4 +29,8 @@ fn compile_repl_keeps_undefined_for_declarations() {
 
     assert_eq!(chunk.instructions.last(), Some(&Instruction::Return));
     assert!(chunk.instructions.contains(&Instruction::Undefined));
+    assert!(chunk
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instruction::InitGlobal(_))));
 }

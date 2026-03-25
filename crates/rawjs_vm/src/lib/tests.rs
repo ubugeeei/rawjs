@@ -39,3 +39,7 @@ use self::test_execute_descriptor_shim_can_call_native_object_methods_to_nested_
 mod test_execute_async_generator_method_next_resolves_to_generator_next_survives_nested_call;
 #[allow(unused_imports)]
 use self::test_execute_async_generator_method_next_resolves_to_generator_next_survives_nested_call::*;
+#[path = "tests/test_execute_repl_bindings_persist_across_inputs.rs"]
+mod test_execute_repl_bindings_persist_across_inputs;
+#[allow(unused_imports)]
+use self::test_execute_repl_bindings_persist_across_inputs::*;

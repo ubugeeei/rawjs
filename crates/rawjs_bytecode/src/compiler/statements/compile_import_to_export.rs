@@ -1,6 +1,7 @@
 impl Compiler {
     pub(super) fn compile_import(&mut self, import_decl: &ImportDeclaration) -> Result<()> {
         let source_idx = self.add_string_constant(&import_decl.source)?;
+        let persist_bindings = self.is_repl_top_level_scope();
         self.emit(Instruction::ImportModule(source_idx));
         for spec in &import_decl.specifiers {
             match spec {
@@ -8,8 +9,14 @@ impl Compiler {
                     self.emit(Instruction::Dup);
                     let binding_idx = self.add_string_constant("default")?;
                     self.emit(Instruction::ImportBinding(binding_idx));
-                    let slot = self.declare_local(local)?;
+                    let (slot, storage) =
+                        self.declare_binding_with_storage(local, persist_bindings)?;
                     self.emit(Instruction::StoreLocal(slot));
+                    if storage == LocalStorage::GlobalAlias {
+                        self.emit(Instruction::LoadLocal(slot));
+                        let idx = self.add_string_constant(local)?;
+                        self.emit(Instruction::InitGlobal(idx));
+                    }
                 }
                 ImportSpecifier::Named {
                     imported, local, ..
@@ -17,13 +24,25 @@ impl Compiler {
                     self.emit(Instruction::Dup);
                     let binding_idx = self.add_string_constant(imported)?;
                     self.emit(Instruction::ImportBinding(binding_idx));
-                    let slot = self.declare_local(local)?;
+                    let (slot, storage) =
+                        self.declare_binding_with_storage(local, persist_bindings)?;
                     self.emit(Instruction::StoreLocal(slot));
+                    if storage == LocalStorage::GlobalAlias {
+                        self.emit(Instruction::LoadLocal(slot));
+                        let idx = self.add_string_constant(local)?;
+                        self.emit(Instruction::InitGlobal(idx));
+                    }
                 }
                 ImportSpecifier::Namespace { local, .. } => {
                     self.emit(Instruction::Dup);
-                    let slot = self.declare_local(local)?;
+                    let (slot, storage) =
+                        self.declare_binding_with_storage(local, persist_bindings)?;
                     self.emit(Instruction::StoreLocal(slot));
+                    if storage == LocalStorage::GlobalAlias {
+                        self.emit(Instruction::LoadLocal(slot));
+                        let idx = self.add_string_constant(local)?;
+                        self.emit(Instruction::InitGlobal(idx));
+                    }
                 }
             }
         }

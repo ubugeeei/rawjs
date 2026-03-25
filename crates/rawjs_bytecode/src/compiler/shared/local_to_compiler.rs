@@ -87,6 +87,9 @@ pub struct Compiler {
     /// that hold `using` resources and need to be disposed when the scope exits.
     /// Outer Vec = scope stack, inner Vec = (slot, is_await) pairs.
     pub(crate) dispose_scopes: Vec<Vec<(u16, bool)>>,
+    /// When true, top-level REPL declarations become persistent bindings so
+    /// later inputs can resolve them.
+    pub(crate) persistent_top_level_bindings: bool,
 }
 
 #[allow(unused_imports)]

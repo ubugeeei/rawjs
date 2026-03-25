@@ -18,6 +18,7 @@ impl Compiler {
 impl Compiler {
     fn compile_program_with_mode(program: &Program, return_last_expression: bool) -> Result<Chunk> {
         let mut compiler = Compiler::new("<script>");
+        compiler.persistent_top_level_bindings = return_last_expression;
         compiler.is_async = true;
         compiler.chunk.is_async = true;
         compiler.is_strict = has_use_strict_directive(&program.body);
@@ -94,6 +95,7 @@ impl Compiler {
             is_strict: false,
             in_function: false,
             dispose_scopes: Vec::new(),
+            persistent_top_level_bindings: false,
         }
     }
 }
