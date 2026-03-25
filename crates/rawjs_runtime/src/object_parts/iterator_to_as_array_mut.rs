@@ -1,52 +1,64 @@
 impl JsObject {
     #[doc = " Create a new iterator object from a vector of values."]
     pub fn iterator(values: Vec<JsValue>) -> Self {
-        JsObject {
+        let mut object = JsObject {
             properties: HashMap::new(),
             symbol_properties: HashMap::new(),
+            shape_id: 0,
             extensible: true,
             prototype: None,
             internal: ObjectInternal::Iterator(IteratorState::new(values)),
-        }
+        };
+        object.refresh_shape();
+        object
     }
 }
 
 impl JsObject {
     #[doc = " Create a new Map object."]
     pub fn map() -> Self {
-        JsObject {
+        let mut object = JsObject {
             properties: HashMap::new(),
             symbol_properties: HashMap::new(),
+            shape_id: 0,
             extensible: true,
             prototype: None,
             internal: ObjectInternal::Map(Vec::new()),
-        }
+        };
+        object.refresh_shape();
+        object
     }
 }
 
 impl JsObject {
     #[doc = " Create a new Promise object."]
     pub fn promise() -> Self {
-        JsObject {
+        let mut object = JsObject {
             properties: HashMap::new(),
             symbol_properties: HashMap::new(),
+            shape_id: 0,
             extensible: true,
             prototype: None,
             internal: ObjectInternal::Promise(PromiseState::new()),
-        }
+        };
+        object.refresh_shape();
+        object
     }
 }
 
 impl JsObject {
     #[doc = " Create a new Set object."]
     pub fn set() -> Self {
-        JsObject {
+        let mut object = JsObject {
             properties: HashMap::new(),
             symbol_properties: HashMap::new(),
+            shape_id: 0,
             extensible: true,
             prototype: None,
             internal: ObjectInternal::Set(Vec::new()),
-        }
+        };
+        object.refresh_shape();
+        object
     }
 }
 
@@ -64,13 +76,16 @@ impl JsObject {
             Property::data(JsValue::string(error_name)),
         );
         let display = format!("{}: {}", error_name, msg);
-        JsObject {
+        let mut object = JsObject {
             properties,
             symbol_properties: HashMap::new(),
+            shape_id: 0,
             extensible: true,
             prototype: None,
             internal: ObjectInternal::Error(display),
-        }
+        };
+        object.refresh_shape();
+        object
     }
 }
 

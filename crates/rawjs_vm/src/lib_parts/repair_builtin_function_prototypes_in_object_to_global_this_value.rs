@@ -14,7 +14,7 @@ impl Vm {
             let mut obj = ptr.borrow_mut();
             if matches!(&obj.internal, ObjectInternal::Function(_)) {
                 if obj.prototype.is_none() {
-                    obj.prototype = Some(function_proto.clone());
+                    obj.set_prototype(Some(function_proto.clone()));
                 }
                 if let Some(prop) = obj.properties.get("prototype") {
                     if let JsValue::Object(proto_obj) = &prop.value {
@@ -47,7 +47,9 @@ impl Vm {
         if let Some(proto_obj) = constructor_target {
             let needs_proto = proto_obj.borrow().prototype.is_none();
             if needs_proto && !proto_obj.ptr_eq(object_proto) {
-                proto_obj.borrow_mut().prototype = Some(object_proto.clone());
+                proto_obj
+                    .borrow_mut()
+                    .set_prototype(Some(object_proto.clone()));
             }
             let has_constructor = proto_obj.borrow().has_own_property("constructor");
             if !has_constructor {

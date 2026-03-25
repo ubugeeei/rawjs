@@ -1,0 +1,264 @@
+# Control Flow
+
+Binary expressions gave us straight-line code.
+
+Control flow is the moment when code generation stops being just "emit the next instruction" and becomes "decide where execution can go next."
+
+That change is fundamental.
+
+As soon as you add:
+
+- `if`
+- `else`
+- `while`
+- `for`
+- `break`
+- `continue`
+
+the compiler must generate jumps.
+
+## Why Control Flow Is A Big Step
+
+Straight-line code has one easy property:
+
+- the next instruction is always the one that comes immediately after the current instruction
+
+Control flow breaks that.
+
+Now execution may:
+
+- skip a block
+- loop back to an earlier point
+- jump out of nested regions
+- merge from two different paths
+
+That means your compiler must track positions and patch instructions after the target location becomes known.
+
+## The Smallest Useful Example
+
+Start with:
+
+```text
+if (cond) {
+    a
+} else {
+    b
+}
+```
+
+The logical lowering is:
+
+```text
+evaluate cond
+jump_if_false else_label
+emit then branch
+jump end_label
+else_label:
+emit else branch
+end_label:
+```
+
+This is the first place where label-like thinking becomes necessary.
+
+## Forward Jumps Need Patching
+
+When you emit `jump_if_false else_label`, you often do not yet know where `else_label` will land.
+
+So the usual compiler flow is:
+
+1. emit a jump with a placeholder offset
+2. remember the position of that jump
+3. keep emitting code
+4. when the target location is known, patch the offset
+
+That is called jump patching.
+
+It is one of the most important low-level compiler techniques in a baseline JIT.
+
+## Relative Jumps
+
+Most machine branches are encoded relative to the current instruction or the next instruction.
+
+That means the compiler eventually computes something like:
+
+```text
+target_offset - branch_site_offset
+```
+
+The exact formula depends on the architecture and instruction encoding, but the concept is always similar.
+
+This is another reason to keep architecture-specific patching in the backend.
+
+Shared compiler logic can think:
+
+- "jump to the else block"
+
+The backend can think:
+
+- "patch bytes 17 through 20 with a signed relative displacement"
+
+## `if` Without `else`
+
+The simple form:
+
+```text
+if (cond) {
+    body
+}
+```
+
+lowers to:
+
+```text
+evaluate cond
+jump_if_false end_label
+emit body
+end_label:
+```
+
+This is a good first control-flow construct because it needs only one forward patch.
+
+## `while` Loops
+
+Loops add backward jumps.
+
+A toy `while` loop:
+
+```text
+while (cond) {
+    body
+}
+```
+
+can lower to:
+
+```text
+loop_start:
+evaluate cond
+jump_if_false loop_end
+emit body
+jump loop_start
+loop_end:
+```
+
+This introduces two important ideas:
+
+- a backward jump for repetition
+- a forward jump to leave the loop
+
+## `break` And `continue`
+
+These operations are where control flow starts needing structured bookkeeping.
+
+Inside a loop:
+
+- `break` jumps to the loop end
+- `continue` jumps to the loop's continue target
+
+For a `while`, the continue target is often the condition check.
+
+For a `for`, it may be the update step.
+
+That means the compiler often keeps a loop context stack with fields like:
+
+- break patch sites
+- continue target
+- optional label name
+
+Then when the loop finishes, all pending break sites are patched to the loop end.
+
+## Basic Blocks
+
+You do not need SSA yet, but it helps to think in terms of basic blocks.
+
+A basic block is a straight-line region with:
+
+- one entry
+- one exit
+
+For example, a tiny `if/else` creates blocks like:
+
+- condition block
+- then block
+- else block
+- merge block
+
+Even if your first compiler emits code directly without an explicit CFG object, this mental model helps.
+
+It makes branch generation much easier to reason about.
+
+## Comparisons And Branches
+
+Control flow often begins with a condition.
+
+So the compiler usually needs some way to:
+
+1. evaluate a condition
+2. branch based on its truth value
+
+In a VM-centered JIT, that may look like:
+
+- emit bytecode lowering for `LessThan`
+- emit a conditional jump based on the result
+
+Or:
+
+- call a runtime helper to compute truthiness
+- branch on the returned boolean
+
+For JavaScript-like semantics, truthiness can be subtle, so a baseline JIT may still rely on helper logic at first.
+
+## Why Control Flow Pushes You Toward Bytecode
+
+This chapter is a great example of why bytecode is easier to JIT than raw source.
+
+Bytecode already makes control flow explicit:
+
+- jump here
+- branch there
+- loop back
+
+That removes a lot of frontend ambiguity.
+
+The JIT can concentrate on:
+
+- native block order
+- patching
+- branch encoding
+
+instead of parsing source-level syntax rules while also reasoning about machine branches.
+
+## A Good First Strategy
+
+For a small JIT, a strong first approach is:
+
+1. lower high-level control flow into bytecode jumps
+2. interpret that bytecode first to verify semantics
+3. JIT-compile those bytecode jumps into native branches
+
+That keeps the control-flow meaning shared between interpreter and JIT.
+
+## What To Avoid Early
+
+Do not start with:
+
+- advanced CFG optimizations
+- branch threading
+- block reordering heuristics
+- speculative control-flow specialization
+
+Those are real techniques, but they are not where the first understanding should come from.
+
+First make the jumps correct.
+
+Then make them fast later.
+
+## What This Chapter Should Leave You With
+
+Control flow adds three crucial JIT ideas:
+
+- not all jumps know their final target immediately
+- loop and branch structure needs bookkeeping
+- straight-line code is only one small part of real compilation
+
+The next chapter returns to storage and naming by adding variables and slots on top of this more realistic execution structure.

@@ -1,0 +1,152 @@
+# Object Pointers
+
+Up to now, most examples could still pretend values were just integers.
+
+That stops being true once objects enter the picture.
+
+JavaScript values include:
+
+- numbers
+- strings
+- booleans
+- objects
+- arrays
+- functions
+- promises
+
+At some point, native code must interact with heap-allocated data.
+
+## Two Common Value Strategies
+
+There are two broad approaches:
+
+- use a tagged value representation that can encode both immediates and pointers
+- use separate native representations and box when needed
+
+Most JavaScript engines use some kind of tagged or compressed value representation.
+
+A small hobby engine may choose a simpler representation first.
+
+The exact format matters less than the rule:
+
+The JIT and the interpreter must agree on what a value means.
+
+## What An Object Pointer Means
+
+An object pointer is not just an integer with a fancy name.
+
+It is a reference to heap-managed state that usually includes:
+
+- properties
+- prototype links
+- flags
+- shape or map metadata in some engines
+- GC reachability concerns
+
+That means native code must treat it as part of the runtime's object model, not as free-form arithmetic data.
+
+## Why Object Semantics Usually Start In Runtime Helpers
+
+Object operations get complex very quickly.
+
+Even something that looks simple, like `obj.x`, may require:
+
+- converting the property name
+- checking own properties
+- walking the prototype chain
+- handling getters
+- handling exotic objects
+
+That is a lot to encode directly in a first JIT.
+
+So a baseline JIT usually calls a runtime stub for many object operations.
+
+That is normal and healthy.
+
+## Allocation
+
+Object allocation is another place where runtime helpers are a good first choice.
+
+Why:
+
+- the runtime already knows heap layout
+- the runtime already knows GC metadata
+- allocation may need write barriers or bookkeeping
+
+So instead of emitting all allocation logic inline, the JIT can call:
+
+```text
+allocate_object_stub(vm, shape_id)
+```
+
+or something similar.
+
+The exact helper name is not important. The separation of responsibility is.
+
+## Garbage Collection Concerns
+
+As soon as native code can hold object references, GC rules matter.
+
+Questions you need to answer:
+
+- where are live pointers stored while JIT code runs?
+- can the GC find them?
+- do you need stack maps or a conservative approach?
+- when do write barriers run?
+
+A hobby engine does not need the most advanced answer immediately, but it does need an explicit answer.
+
+Ignoring this part works only until the first collector bug appears.
+
+## Why The VM Pointer Helps Again
+
+If compiled code receives a `Vm` pointer, many object operations become easier to structure.
+
+The JIT can:
+
+- load and store values through VM-managed frames
+- call runtime helpers with access to the heap
+- keep allocation and GC coordination centralized
+
+This is one of the reasons baseline JITs often use a VM-centered entry point instead of pretending compiled code is fully standalone.
+
+## Tagged Values And Pointers
+
+Eventually you may want a representation where one machine word can hold:
+
+- a small integer
+- a heap pointer
+- a special value like `undefined` or `null`
+
+That can reduce overhead and make native operations faster.
+
+But it also increases implementation complexity.
+
+For a tutorial path, it is often better to:
+
+1. start with a simpler representation
+2. make the JIT correct
+3. only then consider denser tagged encodings
+
+## What Changes Conceptually
+
+Before objects, native code could mostly think in terms of plain arithmetic values.
+
+After objects, native code is operating on runtime-managed entities.
+
+That means the JIT is now tightly coupled to:
+
+- heap layout
+- value representation
+- GC rules
+- runtime helper APIs
+
+That is not a failure of the design.
+
+That is what a real language runtime looks like.
+
+The next few chapters make that runtime relationship more concrete:
+
+- first, `this`, prototypes, and hidden classes or shapes
+- then, garbage collection
+- then, native builtins and runtime helper functions

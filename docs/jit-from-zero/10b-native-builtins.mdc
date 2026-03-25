@@ -1,0 +1,220 @@
+# Native Builtins
+
+Once a VM exists, not every function in the language has to be written in the language itself.
+
+Many runtimes provide native builtins:
+
+- functions implemented in Rust, C, or C++
+- methods exposed as ordinary language-level functions
+- host-provided helpers such as `print`
+
+These builtins are part of the runtime, but from user code they often look like normal functions.
+
+## What Counts As A Native Builtin
+
+Examples of native builtins in a JavaScript-like engine include:
+
+- `Math` functions
+- `Array.prototype.push`
+- `String.prototype.slice`
+- `Promise.resolve`
+- global helpers like `parseInt`
+- host functions like `print`
+
+The exact list varies by engine, but the idea is the same:
+
+The function body is implemented in native runtime code, not by interpreting source.
+
+## Why Native Builtins Exist
+
+There are several reasons to implement builtins natively.
+
+### Some Functions Need Runtime Privileges
+
+Builtins may need direct access to:
+
+- the heap
+- internal object layouts
+- promise queues
+- GC-aware allocation
+
+That is much easier from runtime code than from user-level source.
+
+### Some Functions Need To Exist Very Early
+
+Before the engine can run much user code, it usually already needs:
+
+- object constructors
+- prototype methods
+- basic math helpers
+- string helpers
+
+Native builtins are a practical way to bootstrap those.
+
+### Some Functions Are Performance-Sensitive
+
+A method like `Array.prototype.push` is a natural candidate for a native implementation because it touches runtime internals directly and may be called very often.
+
+## How A Native Builtin Is Represented
+
+At the object-model level, a native builtin often still appears as a normal function object.
+
+That function object may carry:
+
+- a name
+- an arity
+- flags such as constructor behavior
+- a native callback pointer or enum tag
+
+So user code can still do things like:
+
+- call it
+- pass it around
+- store it in objects
+
+The difference is how the call is executed.
+
+## A Common Callback Shape
+
+In a Rust implementation, a builtin callback often looks like:
+
+```rust
+fn builtin(heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> Result<JsValue>
+```
+
+The exact signature can vary, but the common ingredients are:
+
+- access to runtime state
+- the receiver or `this`
+- the argument list
+- a result that can also carry errors
+
+That shape matches the real needs of builtins much better than pretending they are plain numeric functions.
+
+## Why Native Builtins Matter To The JIT
+
+Native builtins are one of the easiest and most useful bridges between the JIT and the runtime.
+
+A baseline JIT often does not inline builtin semantics at first.
+
+Instead, it:
+
+1. evaluates the receiver and arguments
+2. prepares the runtime call
+3. calls a native builtin or a stub that dispatches to it
+4. resumes execution with the returned value
+
+This is a very good design.
+
+It keeps the JIT simple while still giving fast access to important runtime behavior.
+
+## Stub Calls And Builtins
+
+This repository already uses a stub-based baseline JIT structure.
+
+That pattern fits builtins well.
+
+The JIT can emit native code for:
+
+- local control flow
+- simple stack movement
+- argument preparation
+
+Then it can call a runtime helper for:
+
+- property-heavy behavior
+- allocation
+- native methods
+- promise helpers
+
+That is not a weakness. That is what baseline JITs are for.
+
+## Errors And Exceptions
+
+Native builtins also need a clear error story.
+
+A builtin may:
+
+- return a normal value
+- throw an error
+- allocate objects
+- schedule async work
+
+That means the calling convention between JIT and runtime must describe:
+
+- how success is returned
+- how failure is signaled
+- where thrown values are stored
+- what cleanup is required before unwinding
+
+This is one reason many JITs use a VM pointer as the main execution context. It gives one place to store exceptional state.
+
+## GC And Re-Entrancy
+
+Builtins may allocate.
+
+If they allocate, they may trigger GC.
+
+Builtins may also call back into other runtime code or even into interpreted code.
+
+That means they are not just "fast helper functions." They are fully part of the engine's execution model.
+
+So the JIT must treat a builtin call as a runtime boundary where:
+
+- GC may happen
+- stack state must be valid
+- exceptions may be raised
+- the queue or promises may be touched
+
+## Native Builtins Versus Host Functions
+
+The line between builtins and host functions is often blurry.
+
+One useful distinction is:
+
+- builtins are part of the language runtime itself
+- host functions are embeddings provided by the outside environment
+
+For example:
+
+- `Math.max` feels like a builtin
+- `print` may be more like a host helper
+
+But from the JIT's perspective, both are often called through the same general machinery: runtime-native callbacks.
+
+## A Good Beginner Strategy
+
+A very practical order for native builtins is:
+
+1. basic globals like `print`
+2. number and string conversions
+3. simple math functions
+4. array and object helpers
+5. promise-related runtime helpers
+
+That order gives you useful language behavior early without forcing the JIT to inline too much too soon.
+
+## How This Connects To The Repository
+
+To compare these ideas with the code here, look at:
+
+- `crates/rawjs_runtime/src/builtins/`
+- `crates/rawjs_runtime/src/object.rs`
+- `crates/rawjs_vm/src/jit/stubs/`
+
+Notice the pattern:
+
+- builtins live in shared runtime code
+- the JIT cooperates with them through stubs and VM-aware calls
+
+That is the right direction for a small engine.
+
+## The Main Lesson
+
+Native builtins are not an escape hatch that makes VM design irrelevant.
+
+They are part of the VM design.
+
+They let the engine centralize complicated behavior in one place while the JIT focuses on speeding up the execution path around that behavior.
+
+The next chapter returns to the larger runtime structure around calls, queues, and promises.

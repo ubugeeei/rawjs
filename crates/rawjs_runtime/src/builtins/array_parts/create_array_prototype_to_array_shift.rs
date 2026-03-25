@@ -49,7 +49,8 @@ pub fn array_constructor(heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> R
     };
     let ptr = heap.alloc(JsObject::array(elements));
     if let JsValue::Object(this_ptr) = this {
-        ptr.borrow_mut().prototype = this_ptr.borrow().prototype.clone();
+        ptr.borrow_mut()
+            .set_prototype(this_ptr.borrow().prototype.clone());
     }
     Ok(JsValue::Object(ptr))
 }

@@ -1,0 +1,27 @@
+# JIT From Zero
+
+The detailed tutorial now lives in the split series under `docs/jit-from-zero/`.
+
+Read the chapters in order:
+
+- `docs/jit-from-zero/00-index.mdc`
+- `docs/jit-from-zero/01-what-a-jit-is.mdc`
+- `docs/jit-from-zero/02-return-one-constant.mdc`
+- `docs/jit-from-zero/03-pass-a-cli-number.mdc`
+- `docs/jit-from-zero/04-machine-code-memory-and-transmute.mdc`
+- `docs/jit-from-zero/05-architecture-layer.mdc`
+- `docs/jit-from-zero/06-binary-expressions.mdc`
+- `docs/jit-from-zero/06a-control-flow.mdc`
+- `docs/jit-from-zero/07-variables-and-slots.mdc`
+- `docs/jit-from-zero/08-vm-and-bytecode.mdc`
+- `docs/jit-from-zero/09-functions-and-closures.mdc`
+- `docs/jit-from-zero/10-object-pointers.mdc`
+- `docs/jit-from-zero/10-this-prototype-and-shapes.mdc`
+- `docs/jit-from-zero/10a-garbage-collection.mdc`
+- `docs/jit-from-zero/10b-native-builtins.mdc`
+- `docs/jit-from-zero/11-call-stack-queue-and-promises.mdc`
+- `docs/jit-from-zero/11a-worker-threads.mdc`
+- `docs/jit-from-zero/12-hotspots-and-real-jits.mdc`
+- `docs/jit-from-zero/12a-deopt-and-osr.mdc`
+
+The series is written in plain English for readers starting from zero knowledge.

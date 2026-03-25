@@ -43,6 +43,8 @@ pub struct JsObject {
     pub properties: HashMap<String, Property>,
     /// Symbol-keyed properties (keyed by symbol ID).
     pub symbol_properties: HashMap<u64, Property>,
+    /// Canonicalized runtime shape ID for property-layout sharing.
+    pub shape_id: u64,
     /// Whether new own properties can be added.
     pub extensible: bool,
     /// Prototype chain link (null = end of chain).
@@ -54,26 +56,32 @@ pub struct JsObject {
 impl JsObject {
     #[doc = " Create a new ordinary (plain) object."]
     pub fn ordinary() -> Self {
-        JsObject {
+        let mut object = JsObject {
             properties: HashMap::new(),
             symbol_properties: HashMap::new(),
+            shape_id: 0,
             extensible: true,
             prototype: None,
             internal: ObjectInternal::Ordinary,
-        }
+        };
+        object.refresh_shape();
+        object
     }
 }
 
 impl JsObject {
     #[doc = " Create a new ordinary object with a prototype."]
     pub fn with_prototype(proto: GcPtr<JsObject>) -> Self {
-        JsObject {
+        let mut object = JsObject {
             properties: HashMap::new(),
             symbol_properties: HashMap::new(),
+            shape_id: 0,
             extensible: true,
             prototype: Some(proto),
             internal: ObjectInternal::Ordinary,
-        }
+        };
+        object.refresh_shape();
+        object
     }
 }
 
@@ -85,9 +93,10 @@ impl JsObject {
             "prototype".to_string(),
             Property::builtin(JsValue::Object(GcPtr::new(JsObject::ordinary()))),
         );
-        JsObject {
+        let mut object = JsObject {
             properties,
             symbol_properties: HashMap::new(),
+            shape_id: 0,
             extensible: true,
             prototype: None,
             internal: ObjectInternal::Function(FunctionObject {
@@ -95,7 +104,9 @@ impl JsObject {
                 upvalues,
                 name,
             }),
-        }
+        };
+        object.refresh_shape();
+        object
     }
 }
 
@@ -108,9 +119,10 @@ impl JsObject {
             "prototype".to_string(),
             Property::builtin(JsValue::Object(GcPtr::new(JsObject::ordinary()))),
         );
-        JsObject {
+        let mut object = JsObject {
             properties,
             symbol_properties: HashMap::new(),
+            shape_id: 0,
             extensible: true,
             prototype: None,
             internal: ObjectInternal::Function(FunctionObject {
@@ -118,7 +130,9 @@ impl JsObject {
                 upvalues: Vec::new(),
                 name,
             }),
-        }
+        };
+        object.refresh_shape();
+        object
     }
 }
 
@@ -130,13 +144,16 @@ impl JsObject {
             "length".to_string(),
             Property::data(JsValue::Number(elements.len() as f64)),
         );
-        JsObject {
+        let mut object = JsObject {
             properties,
             symbol_properties: HashMap::new(),
+            shape_id: 0,
             extensible: true,
             prototype: None,
             internal: ObjectInternal::Array(elements),
-        }
+        };
+        object.refresh_shape();
+        object
     }
 }
 
@@ -150,12 +167,15 @@ impl JsObject {
             Property::data(JsValue::string(msg.as_str())),
         );
         properties.insert("name".to_string(), Property::data(JsValue::string("Error")));
-        JsObject {
+        let mut object = JsObject {
             properties,
             symbol_properties: HashMap::new(),
+            shape_id: 0,
             extensible: true,
             prototype: None,
             internal: ObjectInternal::Error(msg),
-        }
+        };
+        object.refresh_shape();
+        object
     }
 }

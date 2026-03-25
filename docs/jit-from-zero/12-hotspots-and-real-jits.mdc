@@ -1,0 +1,145 @@
+# Hotspots And Real JITs
+
+This chapter is intentionally near the end because it carries one of the most important production truths.
+
+The earlier chapters taught the mechanics of JIT compilation by compiling tiny examples immediately.
+
+That is the right learning order.
+
+It is not the full production strategy.
+
+## The Rule To Remember
+
+Real engines should usually interpret first and JIT hotspots selectively.
+
+That sentence carries a lot of practical wisdom.
+
+## Why Not JIT Everything
+
+JIT compilation is not free.
+
+Compiling everything means paying for:
+
+- compile time
+- extra memory for native code
+- code cache management
+- more warm-up work before peak speed
+
+If a function runs once, the compile cost may be larger than the execution cost.
+
+That is why immediate compilation is often a bad default for real workloads.
+
+## What Counts As A Hotspot
+
+A hotspot is code that runs often enough that compilation cost can be repaid.
+
+Common signals are:
+
+- a function call count crossing a threshold
+- a loop back-edge counter crossing a threshold
+- repeated execution of the same bytecode region
+
+The exact metric depends on the engine, but the principle is the same:
+
+Only compile code that is likely to matter.
+
+## A Healthier Long-Term Pipeline
+
+A realistic engine often grows toward this shape:
+
+1. parse source code
+2. produce bytecode
+3. interpret bytecode
+4. collect hotness counters
+5. JIT hot functions or hot loops
+6. maybe optimize the hottest code more aggressively
+
+This layered strategy gives you:
+
+- fast startup from the interpreter
+- lower compile overhead
+- a place to collect profiling data
+- a path to deeper optimization later
+
+## Baseline First, Then Maybe More
+
+A very practical long-term design is:
+
+1. interpreter
+2. baseline JIT
+3. optional optimizing tier later
+
+The baseline JIT removes interpreter dispatch overhead.
+
+An optimizing JIT can later use profile information for things like:
+
+- inlining
+- specialization
+- constant propagation
+- shape-based optimizations
+- speculative fast paths
+
+But those optimizations only make sense once the baseline system is already correct and measurable.
+
+## Deoptimization
+
+Once an engine starts making speculative assumptions, it usually also needs deoptimization.
+
+That means:
+
+- native code made an assumption
+- the assumption stopped being true
+- execution falls back to a safer representation, often the interpreter or a less optimized tier
+
+This tutorial series does not build deoptimization because it would hide the basic mechanics behind too much extra machinery.
+
+But if you ever aim for a serious optimizing JIT, deoptimization becomes a central design concern.
+
+## How This Relates To This Repository
+
+This repository currently uses a baseline JIT structure with explicit backends for:
+
+- `aarch64`
+- `x86_64`
+- `riscv64`
+
+That is already a meaningful step beyond an interpreter-only engine.
+
+The next natural long-term improvement would not be "compile more things blindly."
+
+It would be:
+
+- add hotness tracking
+- decide when code should be compiled
+- keep cold code in the interpreter
+
+That would align the engine more closely with how real JIT-based runtimes manage their work.
+
+## The Full Mental Model
+
+If you finished the full series, the big picture should now look like this:
+
+1. machine code is just structured bytes
+2. executable memory plus ABI turns those bytes into callable functions
+3. architecture layers keep encoding details contained
+4. expressions and variables introduce compiler structure
+5. a VM gives the JIT a stable semantic target
+6. functions, closures, objects, queues, and promises live in the runtime model
+7. the JIT accelerates parts of that model
+8. a real engine chooses carefully which parts are worth compiling
+
+That final point is the one beginners most often underestimate.
+
+Building a JIT is exciting.
+
+Building a good JIT strategy is what makes it practical.
+
+## A Good Next Step
+
+If you want to continue after this series, a strong next milestone is:
+
+Implement hotness counting for functions or loops, then only JIT once a threshold is crossed.
+
+That would turn the toy "compile immediately" story into the beginning of a real execution policy.
+
+The next chapter takes one more advanced step and explains what happens when optimized assumptions break: deoptimization and OSR.

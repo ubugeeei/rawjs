@@ -15,7 +15,7 @@ fn load_arguments_object(vm: &mut Vm) -> Result<()> {
     let param_count = vm.chunks[frame.chunk_index].param_count as usize;
     let mut obj = JsObject::ordinary();
     if let Some(proto) = &vm.object_prototype {
-        obj.prototype = Some(proto.clone());
+        obj.set_prototype(Some(proto.clone()));
     }
     obj.internal = ObjectInternal::ArgumentsObject(
         (0..args.len())

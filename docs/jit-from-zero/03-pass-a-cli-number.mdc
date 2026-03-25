@@ -1,0 +1,135 @@
+# Pass A CLI Number
+
+Once you can return one hard-coded constant, the next useful step is to make the generated code depend on runtime input.
+
+This is the first time the "dynamic" part of dynamic code generation becomes visible.
+
+Instead of embedding a constant that you chose at compile time, you will:
+
+1. read a number from the command line
+2. parse it at runtime
+3. patch that number into the machine-code buffer
+4. execute the resulting function
+
+## Why This Step Matters
+
+The first chapter proved that emitted bytes can run.
+
+This chapter proves something more interesting:
+
+The bytes can be shaped by runtime data.
+
+That means your JIT is no longer just replaying a fixed code template. It is assembling a new program instance for the current execution.
+
+## A Very Small Flow
+
+The data flow looks like this:
+
+```text
+CLI string -> parsed integer -> instruction immediate -> executable code -> CPU result
+```
+
+That is already a JIT pipeline, even if it is still tiny.
+
+## A Simple Rust Sketch
+
+For the same x86_64 `mov eax, imm32; ret` example, the immediate occupies four bytes after the opcode.
+
+That means a toy implementation can look like this:
+
+```rust
+let value: u32 = std::env::args()
+    .nth(1)
+    .expect("missing number")
+    .parse()
+    .expect("invalid number");
+
+let mut code = vec![0xB8, 0, 0, 0, 0, 0xC3];
+code[1..5].copy_from_slice(&value.to_le_bytes());
+```
+
+The important part is not the syntax. The important part is the idea:
+
+The machine instruction has a field inside it, and you are writing runtime data into that field.
+
+## Immediate Fields
+
+An immediate is a literal value stored inside an instruction.
+
+In our example:
+
+- opcode: `mov eax, imm32`
+- immediate: the four-byte integer
+
+That leads to a useful beginner habit:
+
+Whenever you add an instruction to your JIT, ask:
+
+- what are the fixed bytes?
+- what are the patchable fields?
+- how wide is each field?
+- what endianness does it use?
+
+Those questions save a lot of debugging time.
+
+## Why CLI Input Is A Good Second Step
+
+The CLI is a good teaching tool because it makes the runtime dependency obvious.
+
+If you typed:
+
+```text
+my_jit 7
+```
+
+and then:
+
+```text
+my_jit 123
+```
+
+you know the executable code buffer must differ between the two runs.
+
+That makes JIT compilation feel concrete instead of abstract.
+
+## What Still Has Not Changed
+
+Even though the value now comes from the CLI, many things are still intentionally simple:
+
+- the function still takes no arguments
+- the result is still a plain integer
+- no stack slots are involved
+- no VM exists yet
+- no interpreter exists yet
+
+That is good.
+
+The step is small enough that if it fails, you still know where to look.
+
+## Why Not Pass The Value As A Function Argument Yet
+
+You could also make the generated function take an argument.
+
+For example:
+
+```rust
+type JitFn = extern "C" fn(u32) -> u32;
+```
+
+That is a good exercise too, but it introduces one more moving part:
+
+- now you also need to know where the first function argument lives according to the ABI
+
+The CLI-patching version is easier as a second step because it keeps the function signature trivial.
+
+Later, once the architecture layer exists, passing a VM pointer or arguments through ABI registers will make much more sense.
+
+## What You Learn Here
+
+At the end of this chapter, you should understand:
+
+- machine code often contains patchable fields
+- those fields can be filled with runtime values
+- the JIT is literally constructing a new native function instance
+
+The next chapter slows down and explains the full path from bytes in memory to a callable Rust function, including executable memory and `std::mem::transmute`.

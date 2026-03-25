@@ -1,0 +1,149 @@
+# Return One Constant
+
+The first JIT program should be almost boring.
+
+That is a good thing.
+
+If the first example is too ambitious, it becomes hard to tell whether a bug comes from:
+
+- instruction encoding
+- calling convention mismatch
+- executable memory setup
+- stack handling
+- the expression compiler itself
+
+So start with the smallest possible target:
+
+Generate a function that returns one constant integer.
+
+## What The CPU Needs
+
+Every architecture has a rule for where a function return value goes.
+
+For the architectures used in this repository, the common return registers are:
+
+- `x86_64`: `eax` or `rax`
+- `aarch64`: `w0` or `x0`
+- `riscv64`: `a0`
+
+That means the smallest useful function looks like this:
+
+1. put a constant into the return register
+2. execute a return instruction
+
+That is enough to get a value back into Rust.
+
+## One Concrete Example On x86_64
+
+For a toy `extern "C" fn() -> u32`, one simple x86_64 sequence is:
+
+```text
+mov eax, imm32
+ret
+```
+
+The raw bytes are:
+
+```text
+B8 <imm32 little-endian> C3
+```
+
+For the value `42`, the buffer is:
+
+```text
+B8 2A 00 00 00 C3
+```
+
+That byte sequence means:
+
+- `B8`: move an immediate value into `eax`
+- `2A 00 00 00`: the little-endian encoding of `42`
+- `C3`: return
+
+This is already native code.
+
+## Why This Tiny Example Matters
+
+Even though it does almost nothing, this example proves several critical things:
+
+- you can build a machine-code buffer yourself
+- the bytes have a real architectural meaning
+- the CPU will execute bytes you produced at runtime
+- Rust can call into that generated code if the ABI matches
+
+That is the whole JIT idea in miniature.
+
+## Why Start With A Register And Not JavaScript Values
+
+At this stage, do not use JavaScript values yet.
+
+Do not use:
+
+- tagged values
+- object pointers
+- heap allocation
+- dynamic dispatch
+
+Only use a plain integer return type.
+
+Why:
+
+The point of the first step is to isolate the mechanism of native code generation.
+
+You want one question only:
+
+Can I emit bytes that the CPU correctly executes?
+
+If you mix in JS semantics too early, the answer becomes much harder to see.
+
+## What The Rust Side Will Eventually Look Like
+
+Conceptually, you are heading toward a shape like this:
+
+```rust
+let code: Vec<u8> = vec![0xB8, 42, 0, 0, 0, 0xC3];
+let entry = copy_to_executable_memory(&code);
+let result = call_entry(entry);
+assert_eq!(result, 42);
+```
+
+The helper functions are still missing, but the mental model is enough for now.
+
+## What Not To Generalize Yet
+
+Do not introduce these abstractions too early:
+
+- a full assembler
+- multiple temporary registers
+- full expression trees
+- branch patching
+- a VM pointer argument
+
+All of those will matter later.
+
+Right now, the only contract is:
+
+The generated function returns one constant number.
+
+## Architecture Notes
+
+This chapter uses an x86_64 example because it is easy to show the bytes directly.
+
+The same high-level idea applies on other architectures:
+
+- put the constant in the return register
+- return
+
+But the actual byte encoding differs a lot.
+
+That is one of the main reasons a clean architecture layer will matter later.
+
+## Checklist For This Step
+
+You are done with this step when you can say:
+
+- I know which register carries the return value.
+- I know which bytes encode a trivial return-constant function on one architecture.
+- I understand that the machine-code buffer is just data until I jump to it.
+
+The next chapter keeps the function tiny, but makes it depend on runtime input from the CLI.

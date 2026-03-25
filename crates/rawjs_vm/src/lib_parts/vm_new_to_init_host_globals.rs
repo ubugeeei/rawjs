@@ -68,7 +68,9 @@ impl Vm {
     fn init_function_and_object_globals(&mut self, obj_proto: &GcPtr<JsObject>) -> GcPtr<JsObject> {
         use rawjs_runtime::builtins;
         let function_proto = builtins::create_function_prototype(&mut self.heap);
-        function_proto.borrow_mut().prototype = Some(obj_proto.clone());
+        function_proto
+            .borrow_mut()
+            .set_prototype(Some(obj_proto.clone()));
         self.function_prototype = Some(function_proto.clone());
         let function_ctor = self.heap.alloc(JsObject::native_function(
             "Function",
@@ -76,7 +78,7 @@ impl Vm {
         ));
         {
             let mut ctor = function_ctor.borrow_mut();
-            ctor.prototype = Some(obj_proto.clone());
+            ctor.set_prototype(Some(obj_proto.clone()));
             ctor.define_property(
                 "prototype".to_string(),
                 rawjs_runtime::Property::builtin(JsValue::Object(function_proto.clone())),
@@ -91,7 +93,7 @@ impl Vm {
         let object_ctor = builtins::create_object_constructor(&mut self.heap);
         {
             let mut ctor = object_ctor.borrow_mut();
-            ctor.prototype = Some(function_proto.clone());
+            ctor.set_prototype(Some(function_proto.clone()));
             ctor.define_property(
                 "prototype".to_string(),
                 rawjs_runtime::Property::builtin(JsValue::Object(obj_proto.clone())),
@@ -111,15 +113,17 @@ impl Vm {
     fn init_host_globals(&mut self, obj_proto: &GcPtr<JsObject>) {
         use rawjs_runtime::builtins;
         let console_ptr = builtins::create_console_object(&mut self.heap);
-        console_ptr.borrow_mut().prototype = Some(obj_proto.clone());
+        console_ptr
+            .borrow_mut()
+            .set_prototype(Some(obj_proto.clone()));
         self.globals
             .insert("console".to_string(), JsValue::Object(console_ptr));
         let math_ptr = builtins::create_math_object(&mut self.heap);
-        math_ptr.borrow_mut().prototype = Some(obj_proto.clone());
+        math_ptr.borrow_mut().set_prototype(Some(obj_proto.clone()));
         self.globals
             .insert("Math".to_string(), JsValue::Object(math_ptr));
         let json_ptr = builtins::create_json_object(&mut self.heap);
-        json_ptr.borrow_mut().prototype = Some(obj_proto.clone());
+        json_ptr.borrow_mut().set_prototype(Some(obj_proto.clone()));
         self.globals
             .insert("JSON".to_string(), JsValue::Object(json_ptr));
     }

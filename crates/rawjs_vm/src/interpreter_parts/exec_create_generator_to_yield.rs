@@ -33,7 +33,7 @@ fn exec_create_generator(
     let mut gen_obj = JsObject::ordinary();
     gen_obj.internal = ObjectInternal::Generator(state);
     if let Some(ref proto) = vm.generator_prototype {
-        gen_obj.prototype = Some(proto.clone());
+        gen_obj.set_prototype(Some(proto.clone()));
     }
     let ptr = vm.heap.alloc(gen_obj);
     vm.push(JsValue::Object(ptr));
@@ -53,7 +53,7 @@ fn exec_create_async_generator(
 fn alloc_promise(vm: &mut Vm) -> rawjs_runtime::GcPtr<JsObject> {
     let promise_ptr = vm.heap.alloc(JsObject::promise());
     if let Some(ref proto) = vm.promise_prototype {
-        promise_ptr.borrow_mut().prototype = Some(proto.clone());
+        promise_ptr.borrow_mut().set_prototype(Some(proto.clone()));
     }
     promise_ptr
 }

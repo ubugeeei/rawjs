@@ -1,0 +1,153 @@
+# VM And Bytecode
+
+Once expressions and variables exist, it becomes useful to stop thinking of the JIT as the entire engine.
+
+This is where a VM starts paying for itself.
+
+## Why Introduce A VM
+
+A VM gives you a stable semantic core.
+
+In practice, that usually means:
+
+- a value representation
+- a stack or register model
+- a bytecode format
+- a place for locals, globals, and constants
+- an interpreter that defines correct behavior
+
+This is a huge win for a JIT project.
+
+Instead of making the JIT define language behavior directly, you let the VM define it once.
+
+Then:
+
+- the interpreter executes the VM operations directly
+- the JIT compiles the same VM operations to native code
+
+That keeps the engine much easier to reason about.
+
+## Why Bytecode Helps
+
+Bytecode sits in a very useful middle layer.
+
+It is lower level than source code, but higher level than machine code.
+
+That means many annoying source-level questions are already handled:
+
+- names may already be resolved to slots or indexes
+- literals may already be stored in a constant table
+- control flow may already be normalized
+- the operation set is explicit
+
+For a JIT, this is excellent.
+
+Compiling bytecode is usually much simpler than compiling raw syntax trees full of language-level ambiguity.
+
+## A Tiny Bytecode Example
+
+A bytecode sequence for:
+
+```text
+let x = 10;
+x + 20
+```
+
+might look like:
+
+```text
+LoadConst 0
+StoreLocal 0
+LoadLocal 0
+LoadConst 1
+Add
+Return
+```
+
+The constant table might be:
+
+```text
+0 -> 10
+1 -> 20
+```
+
+This is small, explicit, and friendly to both the interpreter and the JIT.
+
+## The Interpreter As Ground Truth
+
+One of the best ways to grow a JIT safely is:
+
+1. implement the semantics in the interpreter first
+2. test them there
+3. make the JIT reuse the same VM rules
+
+This matters because once you reach real JavaScript behavior, operations become complicated:
+
+- `+` is not just numeric add
+- property access is not just pointer arithmetic
+- function calls affect frames and `this`
+- promises schedule microtasks
+
+If the JIT tries to redefine all of that alone, bugs multiply quickly.
+
+## What A Baseline JIT Usually Compiles
+
+A baseline JIT does not need to compile everything into pure machine-level logic.
+
+Instead, it often does this:
+
+- inline simple control flow and local data movement
+- call runtime stubs for complicated operations
+
+That is a very practical model.
+
+Examples of operations that a baseline JIT can often handle directly:
+
+- local loads and stores
+- constant loads
+- simple branches
+- returns
+
+Examples of operations that often stay in runtime stubs at first:
+
+- object allocation
+- property access
+- dynamic calls
+- promise resolution
+- exception paths
+
+## Why The VM Comes Before Advanced Features
+
+If you try to add functions, closures, object pointers, and promises before a VM exists, the JIT ends up carrying too much semantic weight.
+
+The VM solves that by giving the JIT a stable contract:
+
+- values mean the same thing in interpreter and JIT modes
+- frames mean the same thing in interpreter and JIT modes
+- helper functions are shared
+
+That makes future chapters much simpler.
+
+## How This Connects To The Repository
+
+In this repository:
+
+- the VM lives in `crates/rawjs_vm/`
+- the interpreter defines behavior
+- the JIT is layered on top as a baseline compiler
+
+That is a strong architecture for a hobby engine because it keeps correctness in one central place.
+
+## The Key Shift In Thinking
+
+Before this chapter, you can think:
+
+"I am generating native code for expressions."
+
+After this chapter, it is healthier to think:
+
+"I am generating native code for VM operations."
+
+That shift is the bridge from a toy JIT to a real engine design.
+
+The next chapter builds on that by adding functions and closures, which require cooperation between compiled code and runtime-managed environments.

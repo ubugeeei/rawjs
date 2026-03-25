@@ -1,0 +1,248 @@
+# Worker Threads
+
+Worker threads are an easy topic to underestimate.
+
+At first glance, they can look like "just run another VM on another thread."
+
+In practice, they force you to answer some of the hardest runtime questions:
+
+- what state is shared and what is isolated
+- how messages move between threads
+- which objects may cross thread boundaries
+- how GC interacts with multiple threads
+- how native builtins and host APIs stay thread-safe
+- what the JIT is allowed to assume about memory visibility
+
+That is why worker threads deserve their own chapter.
+
+## The Basic Model
+
+A good first mental model is:
+
+- each worker has its own VM instance
+- each worker has its own call stack
+- each worker has its own queue or event loop
+- workers communicate by message passing
+
+This is much easier to reason about than letting all threads share one giant mutable VM.
+
+For a JavaScript-like runtime, that is also conceptually close to how workers are commonly presented:
+
+- one worker runs one script
+- it does not share ordinary objects directly with another worker
+- it communicates through messages
+
+## Isolation First
+
+If you are building workers for the first time, isolation is your friend.
+
+The safest first design is:
+
+- one heap per worker
+- no shared mutable ordinary objects
+- messages copied or cloned between workers
+
+Why this helps:
+
+- GC is simpler
+- locks are simpler
+- the JIT can make more local assumptions
+- runtime bugs are easier to debug
+
+This does not mean no sharing ever. It means isolation should be the default.
+
+## Message Passing
+
+The first real worker feature is usually message passing.
+
+That means you need:
+
+- a send operation
+- a receive queue or mailbox
+- a representation for posted messages
+- a rule for when the receiving worker drains its queue
+
+The simplest design is:
+
+1. one worker posts a message
+2. the runtime serializes or clones the value
+3. the receiving worker enqueues a task
+4. the receiving worker eventually runs that task
+
+This is much easier than sharing arbitrary object graphs directly.
+
+## Structured Clone Or Something Like It
+
+If workers pass values, the runtime needs a cross-thread transfer rule.
+
+A common model is structured cloning or a smaller variant of it.
+
+The important design questions are:
+
+- which values can be copied
+- which values are rejected
+- which values are transferred instead of copied
+- whether object identity is preserved within the cloned graph
+
+For a hobby engine, it is okay to start small.
+
+For example, you might initially support only:
+
+- numbers
+- booleans
+- strings
+- arrays of cloneable values
+- plain objects with cloneable properties
+
+Then grow from there.
+
+## Shared Memory Changes Everything
+
+As soon as you add shared memory, worker threads stop being just message passing.
+
+Features like:
+
+- shared array buffers
+- atomics
+- cross-thread visibility rules
+
+introduce a much stricter correctness burden.
+
+Now the JIT must care about:
+
+- memory ordering
+- fences
+- atomic loads and stores
+- operations that cannot be reordered freely
+
+That is a very different problem from single-threaded JS execution.
+
+For a first worker implementation, it is completely reasonable to delay shared memory and start with isolated workers plus messages.
+
+## What The JIT Must Care About
+
+Even without shared ordinary objects, worker threads still affect the JIT.
+
+### Runtime Entry Contracts
+
+Compiled code may now run in multiple VM instances on multiple OS threads.
+
+That means:
+
+- thread-local state must be clear
+- helper functions must know which VM they are operating on
+- caches must not accidentally become process-global mutable state unless they are synchronized
+
+### Code Memory Ownership
+
+You also need a policy for native code memory:
+
+- does each worker own its own compiled code
+- is compiled code shared across workers
+- if code is shared, who owns its lifetime
+
+Per-worker code caches are often simpler at first.
+
+### Safepoints And GC Coordination
+
+With multiple workers, a collector may need to answer:
+
+- is collection per-worker or global
+- can one worker collect independently
+- do all workers need to stop for a shared heap
+
+If each worker has its own heap, GC becomes much easier to reason about.
+
+That is another reason isolated workers are a strong first design.
+
+## Native Builtins Become More Sensitive
+
+Native builtins that were fine in a single-threaded runtime may need redesign once workers exist.
+
+Questions to ask:
+
+- does this builtin touch shared host state
+- does it allocate in a worker-local heap
+- is it safe to call concurrently
+- does it post tasks back to a main thread
+
+For example, host-style builtins such as:
+
+- `print`
+- timers
+- file access
+- network access
+
+often need explicit thread policy once workers exist.
+
+## Queue Model Per Worker
+
+Earlier, the queue chapter explained microtasks and deferred jobs.
+
+With workers, that model usually becomes:
+
+- each worker has its own queue
+- promise reactions run on the queue of the worker that owns the promise
+- posted messages enqueue new jobs on the receiving worker
+
+This keeps event ordering much easier to define.
+
+## A Good First Worker Design
+
+For a hobby engine, a strong first design is:
+
+1. one VM per worker
+2. one heap per worker
+3. one queue per worker
+4. message passing only
+5. no shared mutable objects at first
+6. no shared-memory atomics until the rest is solid
+
+This design is limited, but very teachable and much safer than jumping directly into shared-memory concurrency.
+
+## How This Connects To Hot JIT Code
+
+Worker threads also interact with JIT policy.
+
+Examples:
+
+- hotness counters may now be per-worker
+- code caches may be per-worker or shared
+- compiled code invalidation may need synchronization
+
+This is one more reason production JIT strategy is about more than raw code generation.
+
+It is about ownership, concurrency, and runtime policy too.
+
+## How This Connects To The Repository
+
+This repository does not yet frame its tutorial around worker threads, but if you add them later, the most important principle is:
+
+Do not let workers destroy the clean VM-centered architecture.
+
+Instead:
+
+- keep worker ownership explicit
+- keep queues explicit
+- keep GC boundaries explicit
+- keep JIT entry contracts explicit
+
+That will make the system much easier to evolve.
+
+## The Main Lesson
+
+Worker threads are not just a scheduling feature.
+
+They are a runtime architecture feature.
+
+They affect:
+
+- VM ownership
+- GC design
+- queue design
+- builtin safety
+- JIT memory and cache policy
+
+That is why they belong in the tutorial before the chapters about real JIT strategy and advanced tier transitions.
+
+The next chapter returns to the biggest practical question: when code should be JIT-compiled at all.

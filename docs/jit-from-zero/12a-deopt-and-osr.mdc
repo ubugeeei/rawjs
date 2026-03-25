@@ -1,0 +1,205 @@
+# Deoptimization And OSR
+
+Once you start talking about hotspots, guarded fast paths, shapes, and optimized tiers, two advanced terms appear quickly:
+
+- deoptimization
+- OSR
+
+They matter because high-performance JITs rarely execute only one permanent version of code.
+
+They often move between execution tiers and recover when optimistic assumptions fail.
+
+## Why Deoptimization Exists
+
+An optimizing JIT usually makes assumptions.
+
+Examples:
+
+- this property load always sees the same shape
+- this value is always an integer
+- this call site always reaches the same target
+- this loop always sees a stable array representation
+
+Those assumptions make faster code possible.
+
+But assumptions can stop being true.
+
+When that happens, the runtime needs a way to leave optimized native code safely and continue execution in a more general form.
+
+That is deoptimization.
+
+## What Deoptimization Means
+
+Deoptimization means:
+
+1. an optimized path notices an assumption failure
+2. execution exits that optimized code
+3. the runtime reconstructs a less optimized execution state
+4. execution continues in the interpreter or a lower tier
+
+The key phrase is reconstruct execution state.
+
+That is the hard part.
+
+## Reconstructing State
+
+Optimized code may not preserve values in the same layout as the interpreter.
+
+For example:
+
+- some locals may live only in registers
+- some values may be folded away
+- some temporaries may not have a direct interpreter slot
+
+So the runtime often needs metadata that answers:
+
+- where each logical variable currently lives
+- which values must be materialized
+- which bytecode position corresponds to this optimized point
+
+Without that metadata, deoptimization is guesswork.
+
+With that metadata, it becomes a controlled transition.
+
+## Guards
+
+A guard is a runtime check attached to an optimized assumption.
+
+For example:
+
+```text
+if object.shape != expected_shape {
+    deopt
+}
+```
+
+Guards are one of the most common entry points into deoptimization.
+
+They say:
+
+- take the fast path if the assumption still holds
+- otherwise leave optimized code safely
+
+This is why shape-based property access and deopt are tightly connected topics.
+
+## OSR
+
+OSR usually means on-stack replacement.
+
+The basic idea is:
+
+- execution begins in one tier, often the interpreter
+- a loop becomes hot while it is already running
+- the engine jumps into compiled code for that same live loop
+
+So instead of waiting for the next function call, the engine can replace the currently running frame with a compiled version at a loop header or another safe transition point.
+
+That is OSR into optimized code.
+
+There is also OSR exit, where execution leaves optimized code and returns to a less optimized form.
+
+## Why OSR Matters
+
+Hot loops are a major source of performance.
+
+Without OSR, an engine may need to wait until the function is called again before optimized code can run.
+
+With OSR, a long-running loop can become faster during the current invocation.
+
+That can matter a lot for:
+
+- numeric loops
+- array-processing loops
+- long-lived computation kernels
+
+## Why OSR Is Hard
+
+OSR requires even more state mapping than ordinary function-entry compilation.
+
+At an OSR entry point, the runtime needs to know:
+
+- which bytecode instruction is active
+- what the current locals are
+- what the current stack values are
+- how to map those values into the compiled frame layout
+
+That means OSR is deeply tied to:
+
+- frame layout
+- value representation
+- safepoint metadata
+- bytecode positions
+
+This is why OSR is rarely an early milestone in hobby engines.
+
+## Baseline JIT Versus Optimizing JIT
+
+A simple baseline JIT often does not need deopt at all.
+
+Why:
+
+- it makes fewer speculative assumptions
+- it stays closer to interpreter semantics
+- it uses runtime stubs for complex operations
+
+That is one more reason baseline JITs are such a good first target.
+
+Deopt and OSR become more important as soon as you want:
+
+- speculative property fast paths
+- stronger type specialization
+- multi-tier execution
+
+## A Good Learning Order
+
+For a hobby engine, a very good progression is:
+
+1. interpreter
+2. baseline JIT
+3. hotspot counting
+4. guarded fast paths
+5. deoptimization metadata
+6. OSR only if the earlier pieces are stable
+
+This order keeps complexity under control.
+
+## How This Connects To `this`, Prototypes, And Shapes
+
+Earlier chapters explained that property access can become fast when shapes stay stable.
+
+Deopt is what makes that optimization safe.
+
+The engine can generate:
+
+- a fast path for the expected shape
+- a fallback when the expectation fails
+
+Without deopt or at least a clean fallback path, speculative optimization becomes dangerous.
+
+## How This Connects To Hotspots
+
+Hotness tells you:
+
+- which code is worth compiling
+
+Deopt and OSR tell you:
+
+- how to move between execution forms safely after you decide to optimize
+
+Together, these chapters describe the difference between:
+
+- a toy JIT that can generate code
+- a tiered runtime that can manage code strategically
+
+## The Main Lesson
+
+Deopt and OSR are not the first things you should build.
+
+But they are the natural next topics once the engine begins relying on:
+
+- speculation
+- guarded property access
+- type-based fast paths
+- tiered execution
+
+If a baseline JIT teaches how to enter native code, deopt and OSR teach how to leave and re-enter it safely when reality changes.

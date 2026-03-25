@@ -1,0 +1,184 @@
+# Binary Expressions
+
+Returning one number is useful as a mechanics test, but it is not yet a compiler in the interesting sense.
+
+The first real compilation target should be a tiny binary expression language.
+
+For example:
+
+```rust
+enum Expr {
+    Int(i64),
+    Add(Box<Expr>, Box<Expr>),
+    Sub(Box<Expr>, Box<Expr>),
+}
+```
+
+The first goal can be something like:
+
+```text
+1 + 2
+```
+
+or:
+
+```text
+(1 + 2) - 3
+```
+
+## Why Binary Expressions Are The Right Next Step
+
+Binary expressions force you to handle all of these:
+
+- recursive structure
+- evaluation order
+- temporary storage
+- combining two intermediate results
+
+That is enough complexity to teach real compiler structure without yet needing full runtime machinery.
+
+## A Simple Compilation Rule
+
+Use one very small contract:
+
+- expression results are returned in the main result register
+
+For example, in a toy compiler:
+
+1. compile the left side
+2. move its result into a temporary place
+3. compile the right side
+4. combine the temporary value with the current result
+
+The temporary place can be:
+
+- one fixed temporary register
+- one stack slot
+- a simple spill area
+
+For learning purposes, one fixed temporary register is often easiest to start with.
+
+## Example: `1 + 2`
+
+A toy lowering might look like this in logical form:
+
+```text
+load 1 into result register
+move result register into tmp
+load 2 into result register
+add tmp to result register
+return
+```
+
+That is not yet optimized, but it is easy to reason about.
+
+## Recursive Compilation
+
+A classic recursive compiler can look like this:
+
+```rust
+fn compile_expr(expr: &Expr) {
+    match expr {
+        Expr::Int(n) => emit_load_int(*n),
+        Expr::Add(lhs, rhs) => {
+            compile_expr(lhs);
+            emit_save_result_to_tmp();
+            compile_expr(rhs);
+            emit_add_tmp_to_result();
+        }
+        Expr::Sub(lhs, rhs) => {
+            compile_expr(lhs);
+            emit_save_result_to_tmp();
+            compile_expr(rhs);
+            emit_sub_result_from_tmp();
+        }
+    }
+}
+```
+
+This compiler is naive, but that is okay.
+
+Naive and correct is a much better start than clever and fragile.
+
+## Evaluation Order Matters
+
+Even in a tiny expression language, the order of evaluation matters.
+
+For `lhs + rhs`, decide one rule and keep it consistent.
+
+The most natural first rule is:
+
+1. evaluate the left side first
+2. evaluate the right side second
+
+This becomes even more important later when expressions can have side effects.
+
+## Register Pressure Begins Here
+
+Binary expressions are where register pressure first appears.
+
+If the expression tree grows deeper, one temporary register may stop being enough.
+
+For example:
+
+```text
+(1 + 2) + (3 + 4)
+```
+
+Now you have several intermediate values.
+
+A beginner-friendly response is:
+
+- use one or two temporary registers
+- spill deeper intermediates to the stack
+
+That is enough for a toy baseline compiler.
+
+You do not need graph coloring or advanced register allocation to learn the important ideas.
+
+## Do Not Pretend This Is JavaScript Yet
+
+A JavaScript `+` operator is much more complicated than integer addition.
+
+It may involve:
+
+- string concatenation
+- number coercion
+- object-to-primitive conversion
+- side effects from conversion hooks
+
+Ignore all of that for now.
+
+The point of this chapter is only to learn:
+
+- recursive code generation
+- temporary value handling
+- structured compiler logic
+
+Later, once a VM exists, the JIT can call runtime helpers for the real JavaScript semantics.
+
+## A Better Mental Model Than "Compile AST Directly Forever"
+
+This chapter compiles a tiny AST directly because it is easy to explain.
+
+But once the language grows, it becomes much easier to JIT from bytecode or another lower-level representation.
+
+Why:
+
+- names are already resolved more often
+- operations are already normalized
+- control flow is more explicit
+- interpreter and JIT can share the same semantic operation set
+
+That transition becomes the subject of the VM chapter later.
+
+## What To Keep
+
+By the end of this chapter, you should understand:
+
+- expression compilation is recursive
+- binary operators force temporary storage
+- evaluation order needs to be explicit
+- a tiny compiler should prefer simple rules over smart rules
+
+The next chapter adds control flow, which means the compiler must start emitting jumps, labels, and patch records instead of only straight-line code.

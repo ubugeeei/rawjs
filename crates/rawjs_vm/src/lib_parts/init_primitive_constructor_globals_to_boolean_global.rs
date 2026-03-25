@@ -6,7 +6,9 @@ impl Vm {
     ) {
         use rawjs_runtime::builtins;
         let array_proto = builtins::create_array_prototype(&mut self.heap);
-        array_proto.borrow_mut().prototype = Some(obj_proto.clone());
+        array_proto
+            .borrow_mut()
+            .set_prototype(Some(obj_proto.clone()));
         self.array_prototype = Some(array_proto);
         let array_ctor = self.heap.alloc(JsObject::native_function(
             "Array",
@@ -14,7 +16,7 @@ impl Vm {
         ));
         {
             let mut ctor = array_ctor.borrow_mut();
-            ctor.prototype = Some(function_proto.clone());
+            ctor.set_prototype(Some(function_proto.clone()));
             ctor.define_property(
                 "prototype".to_string(),
                 rawjs_runtime::Property::builtin(JsValue::Object(
@@ -44,7 +46,9 @@ impl Vm {
     ) {
         use rawjs_runtime::builtins;
         let string_proto = builtins::create_string_prototype(&mut self.heap);
-        string_proto.borrow_mut().prototype = Some(obj_proto.clone());
+        string_proto
+            .borrow_mut()
+            .set_prototype(Some(obj_proto.clone()));
         self.string_prototype = Some(string_proto);
         let string_ctor = self.heap.alloc(JsObject::native_function(
             "String",
@@ -52,7 +56,7 @@ impl Vm {
         ));
         {
             let mut ctor = string_ctor.borrow_mut();
-            ctor.prototype = Some(function_proto.clone());
+            ctor.set_prototype(Some(function_proto.clone()));
             ctor.define_property(
                 "prototype".to_string(),
                 rawjs_runtime::Property::builtin(JsValue::Object(
@@ -81,7 +85,9 @@ impl Vm {
     ) {
         use rawjs_runtime::builtins;
         let boolean_proto = builtins::create_boolean_prototype(&mut self.heap);
-        boolean_proto.borrow_mut().prototype = Some(obj_proto.clone());
+        boolean_proto
+            .borrow_mut()
+            .set_prototype(Some(obj_proto.clone()));
         self.boolean_prototype = Some(boolean_proto);
         let boolean_ctor = self.heap.alloc(JsObject::native_function(
             "Boolean",
@@ -89,7 +95,7 @@ impl Vm {
         ));
         {
             let mut ctor = boolean_ctor.borrow_mut();
-            ctor.prototype = Some(function_proto.clone());
+            ctor.set_prototype(Some(function_proto.clone()));
             ctor.define_property(
                 "prototype".to_string(),
                 rawjs_runtime::Property::builtin(JsValue::Object(

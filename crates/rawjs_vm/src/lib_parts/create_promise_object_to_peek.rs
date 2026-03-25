@@ -2,7 +2,7 @@ impl Vm {
     pub(crate) fn create_promise_object(&mut self) -> GcPtr<JsObject> {
         let promise_ptr = self.heap.alloc(JsObject::promise());
         if let Some(ref proto) = self.promise_prototype {
-            promise_ptr.borrow_mut().prototype = Some(proto.clone());
+            promise_ptr.borrow_mut().set_prototype(Some(proto.clone()));
         }
         promise_ptr
     }

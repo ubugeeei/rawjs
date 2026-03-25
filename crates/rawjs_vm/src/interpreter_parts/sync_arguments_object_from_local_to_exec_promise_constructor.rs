@@ -57,7 +57,7 @@ fn exec_promise_constructor(vm: &mut Vm, args: &[JsValue]) -> Result<()> {
     }
     let promise_ptr = vm.heap.alloc(JsObject::promise());
     if let Some(ref proto) = vm.promise_prototype {
-        promise_ptr.borrow_mut().prototype = Some(proto.clone());
+        promise_ptr.borrow_mut().set_prototype(Some(proto.clone()));
     }
     let promise_id = vm.heap.next_promise_id;
     vm.heap.next_promise_id += 1;

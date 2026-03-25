@@ -1,0 +1,152 @@
+# Functions And Closures
+
+Functions change the problem more than variables did.
+
+With expressions and locals, one frame was enough.
+
+With functions, you now need:
+
+- parameters
+- call boundaries
+- return addresses
+- nested scopes
+- captured variables
+
+That is why many toy JITs feel easy at first and then suddenly become much harder when functions arrive.
+
+## What A Function Adds
+
+A function call means:
+
+1. control transfers to a new code body
+2. arguments become visible in a new environment
+3. local variables live in a new frame
+4. execution eventually returns to the caller
+
+Even a non-closure function already needs a frame model.
+
+That frame usually stores:
+
+- locals
+- arguments
+- the return point
+- a link to the current function or code object
+
+## A Simple Function Model
+
+The first useful function model can be:
+
+- each function has its own bytecode chunk
+- each call pushes a new frame
+- locals are addressed by slot index
+- arguments are copied into known argument slots
+
+This is enough to support:
+
+```text
+function add(a, b) { return a + b; }
+add(1, 2)
+```
+
+The JIT does not need heroic tricks here.
+
+It only needs to preserve the same semantics as the interpreter.
+
+## Why Closures Are Different
+
+Closures are the first point where stack-only local storage stops being enough.
+
+Consider:
+
+```text
+function outer() {
+    let x = 10;
+    return function inner() {
+        return x;
+    };
+}
+```
+
+When `outer` returns, `inner` may still exist.
+
+That means the captured variable `x` must survive after `outer`'s stack frame is gone.
+
+So a captured value needs a different representation than an ordinary stack local.
+
+## Upvalues Or Captured Cells
+
+A very common solution is to store captured locals in heap-backed cells.
+
+The rough model is:
+
+1. ordinary uncaptured locals stay in frame slots
+2. captured locals are promoted into shared cells
+3. closures store references to those cells
+
+Then a closure load becomes:
+
+- follow the closure's environment pointer
+- read the captured cell
+
+This is much easier to manage than pretending every local can remain on the stack forever.
+
+## Why The JIT Should Reuse The VM Model
+
+Closures are a great example of why the VM must define the semantics first.
+
+If the interpreter already has a clear closure representation, the JIT should use the same one.
+
+That means compiled code can:
+
+- load captured cells using the VM's environment layout
+- call runtime helpers when creating closure objects
+- avoid inventing a second closure system
+
+This is safer and much easier to test.
+
+## Calling Convention Between JIT And Runtime
+
+Once functions exist, you need at least two layers of calling convention:
+
+- the machine ABI, which the CPU and OS care about
+- the VM function contract, which your runtime cares about
+
+For example, the compiled entry point might be:
+
+```text
+extern "C" fn(*mut Vm) -> u32
+```
+
+That says:
+
+- native code receives a pointer to the VM
+- the JIT reads arguments, locals, and metadata through the VM
+- the return value may be a status code or a tagged result
+
+This is a common baseline JIT design because it keeps the runtime state centralized.
+
+## Why A Baseline JIT Often Uses Stubs For Calls
+
+Directly compiling every call shape is possible, but it grows complicated quickly.
+
+A baseline JIT often uses helper stubs for:
+
+- argument preparation
+- call dispatch
+- closure construction
+- `this` binding logic
+- slow paths
+
+That is a good trade-off.
+
+The JIT still removes interpreter dispatch overhead, but the runtime remains responsible for the most language-sensitive parts.
+
+## What To Learn From This Stage
+
+Functions teach frame management.
+
+Closures teach lifetime management.
+
+Together they show why a JIT is not only about emitting arithmetic instructions. It is about integrating native code with a long-lived runtime model.
+
+The next chapter continues that integration by introducing object pointers and heap-managed values.

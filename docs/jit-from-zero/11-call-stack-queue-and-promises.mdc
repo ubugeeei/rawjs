@@ -1,0 +1,164 @@
+# Call Stack, Queue, And Promises
+
+This chapter groups three ideas that all depend on runtime coordination more than raw instruction encoding:
+
+- the call stack
+- the deferred work queue
+- promises
+
+These features are where the difference between "machine code generation" and "language runtime design" becomes very clear.
+
+## The Call Stack
+
+As soon as one function can call another, the runtime needs call frames.
+
+A frame commonly stores:
+
+- the current function or chunk
+- the instruction pointer or return point
+- local slots
+- argument slots
+- closure or upvalue references
+- `this` if the language needs it
+
+The native machine stack may also be involved, but the VM often keeps its own logical call stack as the source of truth.
+
+That is especially helpful for:
+
+- debugging
+- exceptions
+- generators
+- async control flow
+
+## Why The VM Usually Owns The Stack Model
+
+If the JIT and interpreter each invent different frame semantics, bugs become painful.
+
+A healthier design is:
+
+- the VM owns the semantic frame layout
+- the interpreter uses it directly
+- the JIT cooperates with it
+
+That lets compiled code and interpreted code transition more safely.
+
+## The Queue
+
+Once async behavior exists, deferred jobs usually exist too.
+
+The simplest model is a queue of pending jobs.
+
+For JavaScript-like runtimes, the most important one is the microtask queue.
+
+A queue model usually needs clear answers to:
+
+- how jobs are enqueued
+- when jobs are drained
+- what VM state is visible during draining
+- whether queue draining is re-entrant
+
+Even a minimal queue can support a surprising amount of async behavior if these rules are explicit.
+
+## Why The Queue Is Not Just A JIT Problem
+
+The queue belongs to the runtime, not to one architecture backend.
+
+Compiled code may trigger queue operations, but it should not redefine queue semantics per architecture.
+
+That means:
+
+- enqueue logic usually lives in shared runtime code
+- queue draining usually lives in shared runtime code
+- the JIT uses helpers or a shared VM interface
+
+This matches the baseline JIT pattern again:
+
+- simple native control where it helps
+- runtime-managed complex semantics where correctness matters most
+
+## Promises
+
+Promises bring together many earlier topics:
+
+- heap objects
+- closures
+- queues
+- function calls
+- error propagation
+
+A small promise implementation usually needs:
+
+- a state: pending, fulfilled, or rejected
+- a stored result or rejection reason
+- a list of reactions
+- resolve and reject operations
+- logic to schedule reaction jobs onto the queue
+
+## A Minimal Promise Flow
+
+A very small promise lifecycle looks like this:
+
+1. create a promise object in the pending state
+2. register fulfillment and rejection reactions
+3. later resolve or reject it
+4. store the result
+5. enqueue reaction jobs
+6. drain the queue
+7. run the reaction callbacks
+
+That is more of a runtime state machine than a raw instruction problem.
+
+## Why Baseline JITs Usually Keep Promise Semantics In Helpers
+
+It is possible to inline parts of promise behavior, but it is rarely the best starting point.
+
+Promise logic touches:
+
+- queue scheduling
+- object allocation
+- reaction lists
+- closure callbacks
+- exception handling
+
+That makes it an excellent candidate for runtime stubs in a baseline JIT.
+
+So a compiled path might do something like:
+
+- load the promise object
+- call `resolve_promise_stub`
+- continue
+
+That is much easier to keep correct than hand-encoding the full state machine in native code.
+
+## Why This Chapter Comes Late
+
+If you tried to implement promises before:
+
+- the VM
+- frames
+- object pointers
+- queues
+
+the whole design would feel chaotic.
+
+Now the layering is clearer:
+
+- the VM owns state and semantics
+- the queue owns deferred scheduling
+- promises are runtime objects that schedule jobs
+- the JIT accelerates selected operations without replacing the whole runtime
+
+## The Big Lesson
+
+By this point, the JIT is no longer just "code that does math faster."
+
+It is part of a larger execution system that includes:
+
+- native code generation
+- VM state
+- heap objects
+- async scheduling
+
+That is why mature JITs are always also runtime systems.
+
+The next chapter extends the runtime model one more step by introducing worker threads and cross-thread execution concerns.

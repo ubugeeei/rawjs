@@ -1,0 +1,145 @@
+# What A JIT Is
+
+Before you emit even one byte of machine code, it helps to know what a JIT actually is.
+
+JIT means just-in-time compiler.
+
+It is a compiler that runs while the program is already running.
+
+That sentence sounds small, but it changes the design a lot.
+
+An ahead-of-time compiler can spend time doing long optimization passes before the program starts.
+
+A JIT lives on the execution path. If it spends too much time compiling, the user feels that delay immediately.
+
+## Interpreter, AOT Compiler, And JIT
+
+It is useful to separate three ideas:
+
+- an interpreter executes a representation directly
+- an ahead-of-time compiler produces native code before execution starts
+- a JIT produces native code during execution
+
+Examples of representations an interpreter or JIT might consume:
+
+- AST nodes
+- bytecode
+- an SSA-based IR
+- a custom low-level IR
+
+In a toy project, a JIT can compile directly from a tiny AST.
+
+In a larger engine, the common pattern is:
+
+1. parse source code
+2. lower it to bytecode or IR
+3. interpret first
+4. identify hot code
+5. compile the hot code to native instructions
+
+## What A JIT Is Not
+
+A JIT is not automatically an optimizing compiler.
+
+A JIT can be:
+
+- a baseline JIT, which mostly removes interpreter overhead
+- an optimizing JIT, which also performs stronger speculation and optimization
+
+A baseline JIT is often the best first target for a small engine.
+
+Why:
+
+- it is easier to keep correct
+- it can reuse runtime helper functions
+- it does not need deep profiling machinery on day one
+- it gives a clear path from interpreter to native execution
+
+This repository follows that simpler path first. The JIT backends are baseline compilers that cooperate closely with the VM.
+
+## Why Not Compile Everything Immediately
+
+This is the most important production lesson in the whole series:
+
+Real JITs should not blindly compile everything.
+
+Compilation has a cost:
+
+- CPU time
+- memory for native code
+- engineering complexity
+- warm-up overhead
+
+If a function runs one time, compiling it may be slower than interpreting it.
+
+That is why real engines usually:
+
+- start in the interpreter
+- collect counters or profiling data
+- compile only hot functions or hot loops
+- sometimes recompile with stronger optimizations later
+
+So why does this series start with immediate JIT examples?
+
+Because immediate examples are the easiest way to understand:
+
+- how code bytes are built
+- how native calling conventions work
+- how runtime data gets patched into code
+
+It is the best learning order, even though it is not the full production strategy.
+
+## The Smallest Honest Mental Model
+
+A useful beginner mental model is:
+
+1. There is some program representation.
+2. A compiler turns that representation into machine code bytes.
+3. Those bytes are placed into executable memory.
+4. The program jumps to that memory as if it were a normal function.
+
+That is enough to understand the first few chapters.
+
+Later, the model grows to include:
+
+- a VM
+- a value representation
+- call frames
+- closures
+- heap objects
+- async queues
+- promises
+
+## Why The VM Matters Even In A JIT Tutorial
+
+Many beginners picture a JIT as a giant replacement for the whole runtime.
+
+That usually leads to trouble.
+
+A better design is:
+
+- the VM defines the language behavior
+- the interpreter gives a simple, correct reference implementation
+- the JIT is an optimization layer on top of that behavior
+
+This is especially helpful once the language stops being just arithmetic and starts including:
+
+- lexical scope
+- object properties
+- exceptions
+- generators
+- async functions
+- promises
+
+At that point, the VM is not optional. It is what keeps the engine understandable.
+
+## What To Keep In Your Head For The Next Chapter
+
+For now, remember only these points:
+
+- a JIT emits native code at runtime
+- runtime compilation is useful but not free
+- a beginner should start with one tiny function
+- a serious engine should compile hot code selectively
+
+The next chapter builds the smallest possible JIT function: a function that returns one constant number.

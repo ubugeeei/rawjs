@@ -1,0 +1,233 @@
+# Garbage Collection
+
+Garbage collection belongs right after object pointers in the tutorial because object pointers create the problem that GC solves.
+
+As long as your values are only plain integers, lifetime is easy.
+
+As soon as values can point to heap objects, you must decide:
+
+- who owns those objects
+- when dead objects are reclaimed
+- how compiled code keeps live pointers safe
+
+That is what this chapter is about.
+
+## What Garbage Collection Is Solving
+
+A garbage collector reclaims heap objects that are no longer reachable.
+
+The key word is reachable.
+
+An object is usually considered live if it can still be found from a set of roots.
+
+Typical roots include:
+
+- globals
+- local variables in active frames
+- closure environments
+- objects referenced by the microtask queue
+- temporary values stored in runtime-managed stacks
+
+If an object is not reachable from any root, the collector can reclaim it.
+
+## Why JIT Code Makes GC Harder
+
+An interpreter often keeps most live values in obvious runtime structures:
+
+- a value stack
+- call frames
+- heap objects
+- global tables
+
+That makes root discovery easier.
+
+A JIT adds a new problem:
+
+Live pointers may now exist in native machine state.
+
+For example:
+
+- a value may be sitting in a register
+- a temporary pointer may be spilled to the native stack
+- a helper call may happen while those values are still live
+
+If the GC cannot find those pointers, it may free live objects.
+
+That usually leads to memory corruption or mysterious crashes.
+
+## Root Discovery
+
+Every GC needs a strategy for finding roots.
+
+The main options are:
+
+- exact root tracking
+- conservative root scanning
+- a restricted design where JIT code keeps roots only in VM-visible places
+
+### Exact Root Tracking
+
+Exact tracking means the runtime knows precisely:
+
+- which stack locations contain pointers
+- which registers contain pointers
+- what each pointer refers to
+
+This is powerful, but it requires more infrastructure.
+
+For JIT code, exact collection often means stack maps or safepoint metadata.
+
+### Conservative Scanning
+
+Conservative scanning means:
+
+- inspect machine stack memory
+- treat anything that looks like a heap pointer as maybe-live
+
+This is easier to bootstrap, but it has trade-offs:
+
+- dead objects may stay alive longer
+- moving collectors become much harder
+- precision is lower
+
+### Keep JIT Roots In VM-Owned Structures
+
+For a hobby baseline JIT, a very practical strategy is:
+
+- keep real language values in VM-managed stacks or frames
+- use native registers mostly for transient transport
+- only call into allocation or GC-relevant helpers at controlled boundaries
+
+This greatly reduces the amount of native-state root tracking you need at first.
+
+It is not the most optimized design, but it is much easier to keep correct.
+
+## Safepoints
+
+A safepoint is a place where the runtime knows it is safe to run GC.
+
+Common safepoint candidates are:
+
+- before or after runtime helper calls
+- loop back-edges
+- function prologues and epilogues
+- allocation slow paths
+
+At a safepoint, the runtime needs enough information to find all live roots.
+
+For a baseline JIT, this often means:
+
+- VM stacks are already synchronized
+- temporary native state is minimized or spilled in a known way
+
+This is another reason baseline JITs like runtime stub boundaries so much. They are natural places to define safepoints.
+
+## Moving And Non-Moving Collectors
+
+Not all collectors move objects.
+
+That distinction matters a lot to JIT code.
+
+### Non-Moving Collection
+
+With a non-moving collector, object addresses stay stable.
+
+That makes a beginner JIT much simpler because:
+
+- native code can hold raw object pointers more easily
+- no pointer rewriting is needed during compaction
+- stack-map pressure is lower
+
+This is why a simple mark-and-sweep collector is often a good first design for a hobby engine.
+
+### Moving Collection
+
+With a moving collector, objects may change addresses during collection.
+
+That can improve fragmentation and performance, but it requires more machinery:
+
+- all roots must be found exactly enough to update them
+- runtime data structures must be patchable
+- JIT-held pointers must be visible or reconstructible
+
+If you want a moving collector later, that is easier once the engine already has:
+
+- clear root tracking
+- clear safepoints
+- a stable VM value representation
+
+## Write Barriers
+
+As soon as you move toward:
+
+- generational GC
+- incremental GC
+- concurrent GC
+
+write barriers become important.
+
+A write barrier is code that runs when one object stores a reference to another object.
+
+The collector may need that information to maintain invariants.
+
+This matters for JIT code because:
+
+- property stores may need barriers
+- array element writes may need barriers
+- closure environment updates may need barriers
+
+In a baseline JIT, it is often simplest to put barrier logic in runtime helpers first.
+
+Then the JIT can call a stub for complex stores instead of inlining the barrier immediately.
+
+## Closures, Queues, And Promises Are Also GC Clients
+
+GC is not just about plain objects.
+
+The collector must also understand:
+
+- closure cells
+- function objects
+- promise reaction records
+- queued jobs that keep callbacks alive
+
+That is why the collector is really part of the whole runtime model, not just the object allocator.
+
+## A Good Beginner Strategy
+
+For a hobby engine, a very strong first GC strategy is:
+
+1. use a non-moving collector
+2. keep roots in VM-visible stacks and frames
+3. make helper calls into natural safepoints
+4. avoid holding long-lived hidden pointers only in native registers
+5. add exact metadata later if you need a moving or more optimized collector
+
+This is slower than a highly tuned production design, but much easier to debug.
+
+## How This Connects To The Repository
+
+If you want to compare these ideas to the repository, look at:
+
+- `crates/rawjs_runtime/src/gc.rs`
+- `crates/rawjs_runtime/src/object.rs`
+- `crates/rawjs_vm/src/lib.rs`
+- `crates/rawjs_vm/src/jit/stubs/`
+
+The important thing to notice is not only the collector implementation itself.
+
+It is the way the JIT and runtime are arranged so that runtime helper boundaries can stay GC-safe.
+
+## What To Keep In Mind
+
+The short version is:
+
+JIT code is not only about arithmetic or branches.
+
+It must cooperate with object lifetime.
+
+If you remember only one rule from this chapter, let it be this:
+
+Never let the GC lose track of a live pointer.
+
+The next chapter explains another major runtime bridge: native builtins.

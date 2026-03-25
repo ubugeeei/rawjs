@@ -41,7 +41,11 @@ impl JsObject {
                 return false;
             }
         }
-        self.properties.remove(name).is_some()
+        let deleted = self.properties.remove(name).is_some();
+        if deleted {
+            self.refresh_shape();
+        }
+        deleted
     }
 }
 

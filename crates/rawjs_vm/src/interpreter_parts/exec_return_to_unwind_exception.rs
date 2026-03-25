@@ -62,13 +62,13 @@ pub(crate) fn exec_create_closure(vm: &mut Vm, const_idx: u16) -> Result<()> {
     let func_obj = JsObject::function(chunk_index, upvalues, name);
     let ptr = vm.heap.alloc(func_obj);
     if let Some(ref proto) = vm.function_prototype {
-        ptr.borrow_mut().prototype = Some(proto.clone());
+        ptr.borrow_mut().set_prototype(Some(proto.clone()));
     } else if let Some(ref proto) = vm.object_prototype {
-        ptr.borrow_mut().prototype = Some(proto.clone());
+        ptr.borrow_mut().set_prototype(Some(proto.clone()));
     }
     if let JsValue::Object(func_proto) = ptr.borrow().get_property("prototype") {
         if let Some(ref proto) = vm.object_prototype {
-            func_proto.borrow_mut().prototype = Some(proto.clone());
+            func_proto.borrow_mut().set_prototype(Some(proto.clone()));
         }
         func_proto.borrow_mut().define_property(
             "constructor".to_string(),

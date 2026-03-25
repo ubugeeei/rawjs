@@ -2,7 +2,9 @@ impl Vm {
     fn init_misc_globals(&mut self, obj_proto: &GcPtr<JsObject>, function_proto: &GcPtr<JsObject>) {
         use rawjs_runtime::builtins;
         let promise_proto = builtins::create_promise_prototype(&mut self.heap);
-        promise_proto.borrow_mut().prototype = Some(obj_proto.clone());
+        promise_proto
+            .borrow_mut()
+            .set_prototype(Some(obj_proto.clone()));
         self.promise_prototype = Some(promise_proto);
         let mut promise_ctor =
             JsObject::native_function("Promise", builtins::promise_constructor_placeholder);
@@ -17,7 +19,9 @@ impl Vm {
             rawjs_runtime::Property::builtin(JsValue::Object(self.heap.alloc(reject_fn))),
         );
         let promise_ctor_ptr = self.heap.alloc(promise_ctor);
-        promise_ctor_ptr.borrow_mut().prototype = Some(function_proto.clone());
+        promise_ctor_ptr
+            .borrow_mut()
+            .set_prototype(Some(function_proto.clone()));
         promise_ctor_ptr.borrow_mut().define_property(
             "prototype".to_string(),
             rawjs_runtime::Property::builtin(JsValue::Object(
@@ -28,7 +32,9 @@ impl Vm {
             .insert("Promise".to_string(), JsValue::Object(promise_ctor_ptr));
         let gen_proto =
             rawjs_runtime::builtins::generator::create_generator_prototype(&mut self.heap);
-        gen_proto.borrow_mut().prototype = Some(obj_proto.clone());
+        gen_proto
+            .borrow_mut()
+            .set_prototype(Some(obj_proto.clone()));
         self.generator_prototype = Some(gen_proto);
         for name in &[
             "Error",
@@ -38,11 +44,14 @@ impl Vm {
             "RangeError",
         ] {
             let ctor = builtins::create_error_constructor(&mut self.heap, name);
-            ctor.borrow_mut().prototype = Some(function_proto.clone());
+            ctor.borrow_mut()
+                .set_prototype(Some(function_proto.clone()));
             self.globals.insert(name.to_string(), JsValue::Object(ctor));
         }
         for (name, func_ptr) in builtins::create_global_functions(&mut self.heap) {
-            func_ptr.borrow_mut().prototype = Some(function_proto.clone());
+            func_ptr
+                .borrow_mut()
+                .set_prototype(Some(function_proto.clone()));
             self.globals
                 .insert(name.to_string(), JsValue::Object(func_ptr));
         }
@@ -57,7 +66,7 @@ impl Vm {
         );
         let global_obj = self.heap.alloc(JsObject::ordinary());
         if let Some(ref proto) = self.object_prototype {
-            global_obj.borrow_mut().prototype = Some(proto.clone());
+            global_obj.borrow_mut().set_prototype(Some(proto.clone()));
         }
         for (name, value) in self.globals.clone() {
             global_obj.borrow_mut().set_property(name, value);

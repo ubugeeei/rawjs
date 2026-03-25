@@ -40,7 +40,7 @@ fn execute_call_method(vm: &mut Vm, argc: usize) -> Result<()> {
 fn create_ordinary_object(vm: &mut Vm) -> GcPtr<JsObject> {
     let ptr = vm.heap.alloc(JsObject::ordinary());
     if let Some(ref proto) = vm.object_prototype {
-        ptr.borrow_mut().prototype = Some(proto.clone());
+        ptr.borrow_mut().set_prototype(Some(proto.clone()));
     }
     ptr
 }
@@ -54,7 +54,7 @@ fn create_array_object(vm: &mut Vm, count: u16) -> Result<GcPtr<JsObject>> {
     let elements: Vec<JsValue> = vm.value_stack.drain(stack_len - count..).collect();
     let ptr = vm.heap.alloc(JsObject::array(elements));
     if let Some(ref proto) = vm.array_prototype {
-        ptr.borrow_mut().prototype = Some(proto.clone());
+        ptr.borrow_mut().set_prototype(Some(proto.clone()));
     }
     Ok(ptr)
 }

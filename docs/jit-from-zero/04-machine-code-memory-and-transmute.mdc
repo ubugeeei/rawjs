@@ -1,0 +1,157 @@
+# Machine Code, Memory, And `std::mem::transmute`
+
+Up to now, we have talked about machine code as a vector of bytes.
+
+That is only half the story.
+
+The other half is:
+
+How do those bytes become a function that Rust can call?
+
+This chapter explains that path.
+
+## Machine Code Is Still Just Data
+
+A `Vec<u8>` is ordinary data.
+
+The CPU does not automatically execute it.
+
+To execute it, you need:
+
+1. memory that contains the bytes
+2. memory permissions that allow execution
+3. a function pointer with the correct ABI
+4. a jump into that entry point
+
+If any of those parts are wrong, the process may crash.
+
+## The Basic Layout
+
+For the tiny x86_64 example, the code buffer looks like this:
+
+```text
+[ B8 ][ imm32 ][ C3 ]
+```
+
+That means:
+
+- one byte of opcode
+- four bytes of immediate value
+- one byte of return instruction
+
+The CPU fetches instructions from the entry address and decodes them in sequence.
+
+There is nothing mystical happening. The CPU is just reading bytes according to the rules of the current architecture.
+
+## Executable Memory
+
+Modern operating systems usually do not let you execute arbitrary writable memory by default.
+
+That is good for security.
+
+So a JIT needs a helper that creates executable memory explicitly.
+
+On Unix-like systems, a common flow is:
+
+1. call `mmap` to allocate pages
+2. copy the bytes into those pages
+3. use `mprotect` if needed to switch permissions
+
+On Windows, the usual family of APIs is:
+
+- `VirtualAlloc`
+- `VirtualProtect`
+
+Many JITs prefer a write-then-execute flow instead of keeping pages writable and executable at the same time.
+
+That is often called a W^X style policy.
+
+## The Rust Side
+
+Once the code bytes live in executable memory, you still need to tell Rust how to call them.
+
+That is where the function pointer type matters.
+
+For the first toy example:
+
+```rust
+type JitFn = extern "C" fn() -> u32;
+```
+
+The `extern "C"` part matters because it fixes the calling convention.
+
+That affects things like:
+
+- where arguments live
+- where the return value lives
+- which registers the callee must preserve
+- how the stack is aligned
+
+## Why `std::mem::transmute` Appears Here
+
+You start with an address, usually something like `*const u8` or `*mut u8`.
+
+To call it like a function, you convert that raw pointer into a function pointer:
+
+```rust
+type JitFn = extern "C" fn() -> u32;
+let func: JitFn = unsafe { std::mem::transmute(code_ptr) };
+let result = func();
+```
+
+This is exactly the moment when raw bytes become a callable function from Rust's point of view.
+
+The request used `std::mem::trunsmute`, but the real function name is `std::mem::transmute`.
+
+## Why This Is Dangerous
+
+`transmute` is not magic and it is not a safety proof.
+
+It is only a conversion.
+
+The real safety requirements are yours to uphold:
+
+- `code_ptr` must point to valid executable memory
+- the code must actually follow the `extern "C" fn() -> u32` ABI
+- the code must not clobber the stack or preserved registers incorrectly
+- the code must eventually return normally
+
+If you violate those assumptions, Rust cannot help you.
+
+## A Useful Beginner Rule
+
+For each generated entry point, always write down its ABI contract in plain language.
+
+For example:
+
+```text
+This entry point takes no arguments.
+It returns a 32-bit integer in the standard return register.
+It does not touch any callee-saved registers.
+It returns with a normal `ret`.
+```
+
+That makes later debugging much easier.
+
+## Why ABI Mistakes Are So Common
+
+At first, machine-code bugs often come from one of these:
+
+- wrong register width
+- wrong stack alignment
+- returning the wrong type
+- forgetting which registers are caller-saved or callee-saved
+- jumping into non-executable memory
+
+That is why the first tutorial steps stay tiny. They let you test one part at a time.
+
+## What You Should Understand Before Moving On
+
+By the end of this chapter, the path should be clear:
+
+1. generate bytes
+2. place them into executable memory
+3. convert the entry address into a function pointer
+4. call it with `std::mem::transmute`
+
+The next chapter deals with the design problem that appears as soon as you support more than one architecture: how to split shared compiler logic from architecture-specific encoding.

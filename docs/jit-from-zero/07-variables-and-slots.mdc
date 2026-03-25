@@ -1,0 +1,181 @@
+# Variables And Slots
+
+Expressions become much more useful once values can be stored and loaded by name.
+
+For example:
+
+```text
+let x = 10;
+x + 20
+```
+
+Now the compiler must answer a new question:
+
+Where does the value of `x` live?
+
+## Start With Slots, Not Fancy Environments
+
+The easiest beginner model is a slot-based frame.
+
+The rule is:
+
+- each local variable name maps to a numeric slot
+- each slot has a concrete storage location in the current frame
+
+That storage location might be:
+
+- a stack offset
+- an interpreter frame slot
+- a location inside a VM-managed locals array
+
+The exact storage medium matters less than the idea.
+
+The important idea is:
+
+Names are frontend syntax.
+
+Slots are runtime addresses.
+
+## A Tiny Example
+
+Suppose the source is:
+
+```text
+let x = 10;
+let y = 20;
+x + y
+```
+
+A simple compiler can lower it conceptually to:
+
+```text
+load const 10
+store slot 0
+load const 20
+store slot 1
+load slot 0
+save to tmp
+load slot 1
+add tmp to result
+return
+```
+
+This is already much easier to JIT than repeatedly working with source-level names.
+
+## The Front-End Job
+
+Even in a toy engine, it helps if earlier stages do some work before JIT compilation.
+
+For example, the parser or bytecode compiler can resolve:
+
+- where each local variable lives
+- whether it is local, global, or captured
+- the order of slots inside the frame
+
+Then the JIT only needs to emit:
+
+- load slot N
+- store slot N
+
+That is one reason JITs often work from bytecode rather than directly from source.
+
+## Stack Layout
+
+If you use stack slots, you need a frame layout rule.
+
+For example:
+
+```text
+[ saved state ][ local 0 ][ local 1 ][ local 2 ]
+```
+
+The exact shape depends on the ABI and runtime design, but you need one stable agreement between:
+
+- the code that creates frames
+- the JIT code that reads and writes slots
+- the interpreter if it shares the same model
+
+## Shadowing And Scope
+
+Variables also force you to think about scope.
+
+For example:
+
+```text
+let x = 1;
+{
+    let x = 2;
+    x
+}
+```
+
+These are not the same variable.
+
+A slot-based compiler usually handles this by:
+
+- pushing a new scope
+- allocating new slots for bindings in that scope
+- popping the scope when leaving the block
+
+For a first implementation, you do not need a sophisticated scope graph.
+
+A simple scope stack is enough.
+
+## Why Closures Are Not Yet Solved
+
+Slots are perfect for ordinary local variables.
+
+They are not enough by themselves for captured variables.
+
+Consider:
+
+```text
+function outer() {
+    let x = 10;
+    return function inner() { return x; };
+}
+```
+
+If `inner` survives after `outer` returns, `x` cannot remain only in a plain stack slot.
+
+That problem belongs to the closures chapter.
+
+For now, treat variables as frame-local unless proven otherwise.
+
+## A Useful Intermediate Form
+
+This is another place where bytecode helps a lot.
+
+A bytecode sequence such as:
+
+```text
+LoadConst 0
+StoreLocal 0
+LoadLocal 0
+LoadConst 1
+Add
+Return
+```
+
+is much easier for both:
+
+- the interpreter
+- the JIT
+
+The interpreter can execute the operations directly.
+
+The JIT can compile the same operations to native code.
+
+That shared semantic layer is exactly why introducing a VM soon becomes helpful.
+
+## What This Step Teaches
+
+Variables teach a deep compiler lesson:
+
+The more frontend work you do before code generation, the simpler the generated code becomes.
+
+That does not mean the frontend should do everything.
+
+It means the JIT should not waste effort solving source-level naming problems if a lower level can already solve them cleanly.
+
+The next chapter introduces the VM, which gives the JIT a stable execution model to target.

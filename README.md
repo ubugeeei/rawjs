@@ -20,3 +20,7 @@ cargo run -- --dump-ast file.js   # dump AST
 cargo run -- --dump-bytecode file.js  # dump bytecode
 cargo run                         # REPL
 ```
+
+## Docs
+
+- [`docs/jit-from-zero/00-index.mdc`](docs/jit-from-zero/00-index.mdc): a detailed, multi-part English tutorial for building a tiny JIT from zero knowledge up to a VM with functions, closures, objects, queues, and promises.

@@ -61,7 +61,7 @@ fn object_get_own_property_descriptor(
     let mut descriptor = JsObject::ordinary();
     if let JsValue::Object(object_ctor) = this {
         if let JsValue::Object(object_proto) = object_ctor.borrow().get_property("prototype") {
-            descriptor.prototype = Some(object_proto);
+            descriptor.set_prototype(Some(object_proto));
         }
     }
     if let Some(getter) = desc.get {

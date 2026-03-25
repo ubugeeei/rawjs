@@ -14,7 +14,7 @@ fn raw_error_to_value(vm: &mut Vm, err: &RawJsError) -> JsValue {
             Property::builtin(JsValue::Object(ctor.clone())),
         );
         if let JsValue::Object(proto) = ctor.borrow().get_property("prototype") {
-            obj.prototype = Some(proto);
+            obj.set_prototype(Some(proto));
         }
     }
     JsValue::Object(vm.heap.alloc(obj))
@@ -124,7 +124,7 @@ fn create_strict_arguments_thrower(vm: &mut Vm) -> rawjs_runtime::GcPtr<JsObject
         strict_arguments_thrower,
     ));
     if let Some(proto) = &vm.function_prototype {
-        ptr.borrow_mut().prototype = Some(proto.clone());
+        ptr.borrow_mut().set_prototype(Some(proto.clone()));
     }
     ptr
 }

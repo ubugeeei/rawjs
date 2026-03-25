@@ -1,0 +1,242 @@
+# `this`, Prototypes, And Hidden Classes Or Shapes
+
+This chapter is about the object model becoming dynamic.
+
+Object pointers alone tell us that values may live on the heap.
+
+They do not yet explain:
+
+- how method calls decide `this`
+- how property lookup walks the prototype chain
+- how runtimes make property access fast enough in practice
+
+Those questions lead directly to prototypes and shapes.
+
+## `this` Is A Calling-Convention Problem At The Language Level
+
+In a JavaScript-like language, `this` is not just another local variable.
+
+It is determined by how a function is called.
+
+That means the runtime must define a `this` binding rule as part of call semantics.
+
+Common cases include:
+
+- plain function call
+- method call
+- constructor call
+- arrow function capture
+
+Even before optimization, this already affects:
+
+- frame setup
+- argument handling
+- call stubs
+- builtin dispatch
+
+## Method Calls
+
+Consider:
+
+```text
+obj.f()
+```
+
+The runtime usually needs to:
+
+1. evaluate `obj`
+2. look up `f`
+3. call the result with `this = obj`
+
+That is different from:
+
+```text
+let g = obj.f;
+g()
+```
+
+Now the callee may be the same function object, but the call shape is different.
+
+The JIT must preserve this distinction.
+
+This is one reason call lowering in JavaScript-like engines is richer than simple "evaluate callee and jump."
+
+## Arrow Functions
+
+Arrow functions are an important contrast because they do not usually bind `this` the same way ordinary functions do.
+
+Instead, they capture it lexically from the surrounding environment.
+
+That means:
+
+- ordinary function calls often compute `this` dynamically
+- arrow functions often read a captured `this` value from the surrounding scope
+
+This is another example of why the JIT should follow the VM's semantic model rather than invent its own shortcut.
+
+## Prototypes
+
+A prototype chain is the reason property access is not just "load field at fixed offset."
+
+If you ask for:
+
+```text
+obj.x
+```
+
+the runtime may need to:
+
+1. check whether `obj` has own property `x`
+2. if not, follow `obj`'s prototype
+3. repeat until a match is found or the chain ends
+
+This means property access is a runtime lookup problem, not only a memory-layout problem.
+
+That is why a baseline JIT often begins with property-access stubs.
+
+## Why Property Access Is Still Optimizable
+
+Even though prototype lookup is dynamic, real programs often produce stable object shapes.
+
+For example:
+
+```text
+let p = { x: 1, y: 2 };
+let q = { x: 3, y: 4 };
+```
+
+The objects may have different values, but their property layout is often structurally similar.
+
+That observation is what leads to hidden classes or shapes.
+
+## Hidden Classes Or Shapes
+
+A hidden class or shape is runtime metadata describing the structural layout of an object.
+
+It often captures things like:
+
+- which properties exist
+- in what order they were added
+- where those properties live
+- what prototype the object links to
+
+Different engines use different terminology:
+
+- hidden class
+- shape
+- map
+
+The key idea is the same:
+
+If many objects share the same structural layout, property access can be optimized around that shared metadata.
+
+## Why Shapes Matter To The JIT
+
+Without shapes, a property load like `obj.x` may need a full dynamic lookup every time.
+
+With shapes, a JIT can often do something like:
+
+1. check that the object's shape matches an expected shape
+2. if it matches, load from a known slot or offset
+3. otherwise jump to a slow path or stub
+
+That is the beginning of inline-cache thinking.
+
+## Shape Transitions
+
+Shapes are not static forever.
+
+If an object changes structure:
+
+```text
+obj.x = 1;
+obj.y = 2;
+```
+
+the runtime may transition the object from one shape to another.
+
+This is another reason a JIT should not hard-code property offsets without a guard.
+
+A fast property path usually needs:
+
+- a shape check
+- a fixed offset load or store
+- a fallback path if the shape changed
+
+## Prototypes And Shapes Together
+
+Shape-based optimization and prototype lookup interact closely.
+
+For example, a property load may be fast only if:
+
+- the receiver has a known shape
+- the prototype chain layout is what the JIT expects
+- no lookup-affecting mutation has happened
+
+If any of those assumptions fail, the engine may need to:
+
+- miss an inline cache
+- fall back to a runtime helper
+- or, in more advanced tiers, deoptimize
+
+That is why this chapter sits naturally before the deopt chapter later.
+
+## `this` And Shapes Also Meet At Call Sites
+
+Method calls often depend on both:
+
+- `this` binding rules
+- object property layout
+
+For example:
+
+```text
+obj.method()
+```
+
+may become fast if the runtime can assume:
+
+- `obj` has the expected shape
+- `method` lives at the expected property location
+- the call path knows how to pass `this = obj`
+
+This is the seed of method-call inline caches.
+
+## A Good Beginner Strategy
+
+For a hobby baseline JIT, a very good order is:
+
+1. make property access correct through runtime helpers
+2. make `this` binding correct through shared call semantics
+3. add shapes in the runtime
+4. add guarded fast paths later
+
+This keeps correctness first and optimization second.
+
+## How This Connects To The Repository
+
+To compare these ideas to the code here, start with:
+
+- `crates/rawjs_runtime/src/object.rs`
+- `crates/rawjs_runtime/src/builtins/object.rs`
+- `crates/rawjs_vm/src/interpreter.rs`
+- `crates/rawjs_vm/src/jit/stubs/objects.rs`
+
+The most important thing to look for is not whether every property access is already fully optimized.
+
+It is whether the runtime and JIT have a clean shared story for:
+
+- `this`
+- property lookup
+- prototype behavior
+- slow paths
+
+## The Main Lesson
+
+Object pointers give you heap identity.
+
+`this`, prototypes, and shapes give that object model operational meaning.
+
+They explain why property access is dynamic, and also why it can still become fast with guards and stable structure.
+
+The next chapter looks at garbage collection, which is what keeps all these heap objects alive and safe while JIT code runs.

@@ -65,7 +65,11 @@ impl JsObject {
         if !self.extensible && !self.properties.contains_key(&name) {
             return false;
         }
+        let is_new = !self.properties.contains_key(&name);
         self.properties.insert(name, Property::data(value));
+        if is_new {
+            self.refresh_shape();
+        }
         true
     }
 }
@@ -86,15 +90,23 @@ impl JsObject {
 impl JsObject {
     #[doc = " Set a symbol-keyed property."]
     pub fn set_symbol_property(&mut self, symbol_id: u64, value: JsValue) {
+        let is_new = !self.symbol_properties.contains_key(&symbol_id);
         self.symbol_properties
             .insert(symbol_id, Property::data(value));
+        if is_new {
+            self.refresh_shape();
+        }
     }
 }
 
 impl JsObject {
     #[doc = " Set a property with full descriptor control."]
     pub fn define_property(&mut self, name: String, prop: Property) {
+        let is_new = !self.properties.contains_key(&name);
         self.properties.insert(name, prop);
+        if is_new {
+            self.refresh_shape();
+        }
     }
 }
 

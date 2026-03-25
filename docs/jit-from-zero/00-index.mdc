@@ -1,0 +1,109 @@
+# JIT From Zero
+
+This is a detailed, step-by-step series about building a tiny JIT compiler from zero knowledge.
+
+It is written for readers who do not already know:
+
+- how machine code works
+- how calling conventions work
+- how a VM differs from a JIT
+- how closures, objects, queues, and promises fit into runtime design
+
+The series starts with the smallest possible experiment and only then grows into a VM-centered baseline JIT.
+
+The learning path is:
+
+1. Learn what a JIT is and what it is not.
+2. Generate native code that returns one constant.
+3. Patch that code with a value from the CLI.
+4. Understand machine code layout, executable memory, and `std::mem::transmute`.
+5. Separate architecture-specific encoding from shared compiler logic.
+6. Compile tiny binary expressions.
+7. Add control flow, jumps, labels, and patching.
+8. Add variables and stack slots.
+9. Introduce a VM and bytecode.
+10. Add functions and closures.
+11. Add object pointers and heap interaction.
+12. Explain `this`, prototypes, and hidden classes or shapes.
+13. Explain garbage collection and what the JIT must do for it.
+14. Explain native builtins and how JIT code calls them.
+15. Add a call stack, a queue, and promises.
+16. Add worker threads and explain what changes when execution is no longer single-threaded.
+17. Explain hotspot-based JIT strategy.
+18. Explain deoptimization and OSR.
+
+## A Very Important Warning
+
+This series begins by JIT-compiling immediately because that is the best way to learn the mechanics.
+
+That is not how a mature engine should behave.
+
+A real engine should usually:
+
+1. parse source
+2. produce bytecode or another IR
+3. interpret first
+4. measure what becomes hot
+5. JIT only hot functions or hot loops
+
+You will see this reminder several times because it matters. A JIT is not free. Compiling cold code wastes time and memory.
+
+## What This Series Is Trying To Teach
+
+The main idea is simple:
+
+Machine code generation is only one part of a JIT.
+
+A useful JIT also depends on:
+
+- a calling convention
+- a value representation
+- runtime helpers
+- a VM contract
+- a strategy for complex features like closures and promises
+
+If you only look at the emitted bytes, the whole system is confusing.
+
+If you first build the mental model step by step, the bytes start making sense.
+
+## How To Read The Series
+
+Read the chapters in order.
+
+The early chapters intentionally use tiny examples that are not yet JavaScript. That is on purpose. Jumping straight into full JavaScript semantics makes the core JIT ideas harder to see.
+
+Each chapter answers one question:
+
+- `01-what-a-jit-is.mdc`: What problem is a JIT solving?
+- `02-return-one-constant.mdc`: What is the smallest executable code buffer?
+- `03-pass-a-cli-number.mdc`: How do we patch code with runtime data?
+- `04-machine-code-memory-and-transmute.mdc`: How do bytes become a callable function?
+- `05-architecture-layer.mdc`: How do we avoid mixing all architectures together?
+- `06-binary-expressions.mdc`: How do we compile `1 + 2`?
+- `06a-control-flow.mdc`: How do branches, loops, and jump patching work?
+- `07-variables-and-slots.mdc`: How do we remember values by name?
+- `08-vm-and-bytecode.mdc`: Why do we need a VM at all?
+- `09-functions-and-closures.mdc`: What changes when functions capture values?
+- `10-object-pointers.mdc`: How does native code touch heap objects?
+- `10-this-prototype-and-shapes.mdc`: How do `this`, prototype chains, and hidden classes shape property access?
+- `10a-garbage-collection.mdc`: How does a collector interact with JIT code?
+- `10b-native-builtins.mdc`: How are builtins implemented in native runtime code?
+- `11-call-stack-queue-and-promises.mdc`: How do async features fit into the runtime?
+- `11a-worker-threads.mdc`: What changes when the runtime can execute JavaScript on multiple threads?
+- `12-hotspots-and-real-jits.mdc`: What does a real JIT strategy look like?
+- `12a-deopt-and-osr.mdc`: How do optimizing tiers recover when assumptions break?
+
+## Where This Connects To The Repository
+
+If you want to compare the tutorial with this repository, the best starting points are:
+
+- `crates/rawjs_vm/src/jit/mod.rs`
+- `crates/rawjs_vm/src/jit/aarch64/`
+- `crates/rawjs_vm/src/jit/x86_64/`
+- `crates/rawjs_vm/src/jit/riscv64/`
+- `crates/rawjs_vm/src/interpreter.rs`
+- `crates/rawjs_vm/src/lib.rs`
+- `crates/rawjs_runtime/src/gc.rs`
+- `crates/rawjs_runtime/src/builtins/`
+
+The repository already has a VM and a baseline JIT. The series explains the ideas underneath that structure in a slower and more beginner-friendly order.

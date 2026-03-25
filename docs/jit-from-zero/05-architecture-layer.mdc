@@ -1,0 +1,174 @@
+# The Architecture Layer
+
+After the first prototype, architecture-specific details start spreading very quickly.
+
+You will see differences in:
+
+- register names
+- instruction encoding
+- immediate widths
+- branch ranges
+- calling conventions
+- stack alignment rules
+
+If you do not separate those details early, the JIT becomes hard to read and hard to extend.
+
+## The Main Design Rule
+
+Keep shared policy separate from architecture-specific encoding.
+
+In plain language:
+
+- shared code decides what operation should happen
+- architecture code decides how to encode that operation
+
+That is the core of the architecture layer.
+
+## What Belongs In Shared JIT Logic
+
+Shared logic usually includes things like:
+
+- walking bytecode or a small IR
+- deciding evaluation order
+- choosing when to call runtime helpers
+- tracking patch sites
+- defining the entry-point contract
+
+These ideas do not fundamentally depend on whether the target is `x86_64`, `aarch64`, or `riscv64`.
+
+## What Belongs In Per-Architecture Code
+
+Per-architecture code usually includes:
+
+- instruction encoders
+- register enums
+- prologue and epilogue details
+- branch patching rules
+- literal pool handling where needed
+- exact call sequences for runtime stubs
+
+The repository follows this structure:
+
+- `crates/rawjs_vm/src/jit/aarch64/`
+- `crates/rawjs_vm/src/jit/x86_64/`
+- `crates/rawjs_vm/src/jit/riscv64/`
+
+That is a healthy pattern.
+
+## A Small Interface
+
+At the beginning, the boundary can be very small.
+
+For example:
+
+```rust
+trait Arch {
+    fn emit_prologue(code: &mut Vec<u8>);
+    fn emit_load_const_u32(code: &mut Vec<u8>, value: u32);
+    fn emit_move_arg0_to_tmp(code: &mut Vec<u8>);
+    fn emit_add_tmp_to_ret(code: &mut Vec<u8>);
+    fn emit_ret(code: &mut Vec<u8>);
+}
+```
+
+This is not a full assembler and does not need to be one.
+
+It is just a clean seam between:
+
+- generic compiler intent
+- target-specific encoding
+
+## Register Differences
+
+Even the first few instructions already differ a lot across architectures.
+
+Examples:
+
+- `x86_64` return values often use `rax`
+- `aarch64` return values often use `x0`
+- `riscv64` return values often use `a0`
+
+Argument registers also differ:
+
+- `x86_64` System V starts with `rdi`, `rsi`, `rdx`, and so on
+- `aarch64` starts with `x0`, `x1`, `x2`, and so on
+- `riscv64` starts with `a0`, `a1`, `a2`, and so on
+
+If shared compiler code hard-codes those names, it will become messy immediately.
+
+## Branch Patching
+
+As soon as you add conditionals or loops, branches appear.
+
+That creates a second reason for an architecture layer:
+
+The size and encoding of jumps differ by architecture.
+
+So a common pattern is:
+
+1. emit a jump with a placeholder
+2. remember the patch site
+3. later compute the final target
+4. ask the backend to patch the encoded branch
+
+The shared compiler can think in terms of "jump to bytecode instruction N" or "jump to native offset K".
+
+The backend can think in terms of bits and byte ranges.
+
+## Why Some Backends Need More Helpers
+
+Not all architectures are equally convenient for every constant or call shape.
+
+For example:
+
+- some constants fit directly in one instruction
+- some need multiple instructions
+- some calls need a literal pool or extra patch records
+
+That means backends do not need perfectly identical internal structure.
+
+They only need a consistent external contract.
+
+## A Baseline JIT Usually Uses Runtime Stubs
+
+A clean architecture layer does not mean every language feature is emitted as pure native code.
+
+In fact, a baseline JIT often works better when it calls back into runtime stubs for complex operations.
+
+That is especially true for:
+
+- property lookup
+- allocation
+- function calls
+- exception paths
+- promise operations
+
+In other words:
+
+Architecture code should mostly encode control and data movement.
+
+Rich language semantics can still live in shared runtime helpers.
+
+## What To Avoid
+
+There are two common mistakes here.
+
+The first mistake is putting architecture-specific register choices in high-level compiler code.
+
+The second mistake is pushing too much semantic policy into the architecture backend.
+
+If the backend starts deciding language semantics, your JIT becomes harder to verify against the interpreter.
+
+## What This Repository Suggests
+
+The repository already uses a stub-based baseline JIT design.
+
+That means:
+
+- the compiler emits native code for the baseline execution path
+- many tricky language operations still go through stub calls
+- architecture directories contain encoding and patching details
+
+That is exactly the kind of design a small engine can grow safely.
+
+The next chapter uses this architectural boundary to compile the first real computation: a tiny binary expression.

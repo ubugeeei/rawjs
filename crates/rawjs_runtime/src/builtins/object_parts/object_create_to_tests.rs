@@ -47,7 +47,7 @@ fn object_set_prototype_of(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) 
             ));
         }
     };
-    target.borrow_mut().prototype = prototype;
+    target.borrow_mut().set_prototype(prototype);
     Ok(JsValue::Object(target))
 }
 

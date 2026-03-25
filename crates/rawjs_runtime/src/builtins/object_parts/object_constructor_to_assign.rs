@@ -4,7 +4,8 @@ fn object_constructor(heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> Resu
         Some(JsValue::Null) | Some(JsValue::Undefined) | None => {
             let ptr = heap.alloc_object(JsObject::ordinary());
             if let JsValue::Object(this_ptr) = this {
-                ptr.borrow_mut().prototype = this_ptr.borrow().prototype.clone();
+                ptr.borrow_mut()
+                    .set_prototype(this_ptr.borrow().prototype.clone());
             }
             Ok(JsValue::Object(ptr))
         }
