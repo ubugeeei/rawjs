@@ -16,6 +16,7 @@ mod aarch64;
         target_arch = "riscv64",
     )),
 ))]
+#[allow(dead_code)]
 mod unsupported;
 
 #[allow(dead_code)]

@@ -9,6 +9,11 @@ unsafe impl Send for JitFunction {}
 unsafe impl Sync for JitFunction {}
 
 impl JitFunction {
+    /// # Safety
+    ///
+    /// `vm` must be a valid, non-null pointer to a live [`Vm`] for the duration
+    /// of the native JIT call, and `self.code` must point to executable code
+    /// generated for the `extern "C" fn(*mut Vm) -> u32` ABI.
     pub unsafe fn call_vm(&self, vm: *mut Vm) -> u32 {
         let function: extern "C" fn(*mut Vm) -> u32 = unsafe { std::mem::transmute(self.code) };
         function(vm)

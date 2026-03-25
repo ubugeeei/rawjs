@@ -16,6 +16,10 @@ pub struct JitFunction {
 }
 
 impl JitFunction {
+    /// # Safety
+    ///
+    /// This stub exists only to satisfy the shared JIT interface on
+    /// unsupported targets. It must never be called for real execution.
     pub unsafe fn call_vm(&self, _vm: *mut Vm) -> u32 {
         1
     }
