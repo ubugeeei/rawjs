@@ -179,8 +179,4 @@ pub(crate) fn get_property_value(vm: &mut Vm, obj_val: &JsValue, name: &str) -> 
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

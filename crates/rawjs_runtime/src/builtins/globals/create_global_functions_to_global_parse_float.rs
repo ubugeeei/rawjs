@@ -151,8 +151,4 @@ pub(super) fn global_parse_float(
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

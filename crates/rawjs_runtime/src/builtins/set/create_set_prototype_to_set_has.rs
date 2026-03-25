@@ -124,8 +124,4 @@ pub(super) fn set_has(_heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> Res
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

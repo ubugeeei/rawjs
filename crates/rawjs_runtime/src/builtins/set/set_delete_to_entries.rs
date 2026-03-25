@@ -109,8 +109,4 @@ pub(super) fn set_entries(heap: &mut Heap, this: &JsValue, _args: &[JsValue]) ->
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

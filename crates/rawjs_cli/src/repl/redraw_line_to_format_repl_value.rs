@@ -137,8 +137,4 @@ pub(super) fn format_repl_value(value: &rawjs_runtime::JsValue) -> String {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

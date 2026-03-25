@@ -134,8 +134,4 @@ fn compile_delete_member() {
     assert!(has_delete, "delete obj.prop should emit DeleteProperty");
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

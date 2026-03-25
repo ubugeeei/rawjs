@@ -50,8 +50,4 @@ fn compile_labeled_while() {
     assert!(chunk.instructions.len() > 3);
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

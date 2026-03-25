@@ -130,8 +130,4 @@ fn compile_sequence() {
     assert_eq!(chunk.instructions[4], Instruction::LoadConst(2));
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

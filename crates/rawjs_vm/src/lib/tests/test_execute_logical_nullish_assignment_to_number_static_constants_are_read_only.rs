@@ -131,5 +131,4 @@ fn test_execute_number_static_constants_are_read_only() {
     assert_eq!(result, JsValue::Boolean(false));
 }
 
-#[allow(unused_imports)]
 use super::*;

@@ -1,9 +1,9 @@
 impl Vm {
-    #[doc = " Execute a module file and return its namespace (exports) object."]
-    #[doc = ""]
-    #[doc = " Resolves the path relative to `current_file_dir`, reads the file,"]
-    #[doc = " parses, compiles, and executes it.  Results are cached so each"]
-    #[doc = " module is only executed once."]
+    /// Execute a module file and return its namespace (exports) object.
+    ///
+    /// Resolves the path relative to `current_file_dir`, reads the file,
+    /// parses, compiles, and executes it.  Results are cached so each
+    /// module is only executed once.
     pub fn execute_module(&mut self, specifier: &str) -> Result<GcPtr<JsObject>> {
         let resolved = self.resolve_module_path(specifier)?;
         if let Some(cached) = self.module_cache.get(&resolved) {
@@ -59,7 +59,7 @@ impl Vm {
 }
 
 impl Vm {
-    #[doc = " Resolve a module specifier to an absolute file path."]
+    /// Resolve a module specifier to an absolute file path.
     pub(super) fn resolve_module_path(&self, specifier: &str) -> Result<String> {
         if !specifier.starts_with("./") && !specifier.starts_with("../") {
             return Err(RawJsError::type_error(format!(
@@ -84,8 +84,4 @@ impl Default for Vm {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

@@ -93,8 +93,4 @@ fn test_logical_not() {
     assert!(!JsValue::string("a").logical_not().to_boolean());
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

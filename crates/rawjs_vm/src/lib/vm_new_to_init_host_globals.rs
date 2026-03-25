@@ -1,5 +1,5 @@
 impl Vm {
-    #[doc = " Create a new VM with built-in globals pre-populated."]
+    /// Create a new VM with built-in globals pre-populated.
     pub fn new() -> Self {
         let mut vm = Vm {
             heap: Heap::new(),
@@ -36,7 +36,7 @@ impl Vm {
 }
 
 impl Vm {
-    #[doc = " Register built-in global bindings."]
+    /// Register built-in global bindings.
     pub(super) fn init_globals(&mut self) {
         let obj_proto = self.init_core_globals();
         let function_proto = self.init_function_and_object_globals(&obj_proto);
@@ -132,8 +132,4 @@ impl Vm {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

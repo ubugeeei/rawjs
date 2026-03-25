@@ -117,8 +117,4 @@ fn compile_compound_assignment() {
     assert!(has_add, "Compound assignment should emit Add");
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

@@ -9,7 +9,7 @@ pub enum PropertyKey {
 }
 
 impl PropertyKey {
-    #[doc = " Create a string property key."]
+    /// Create a string property key.
     pub fn from_string(s: &str) -> Self {
         if let Ok(idx) = s.parse::<u32>() {
             if idx.to_string() == s {
@@ -21,7 +21,7 @@ impl PropertyKey {
 }
 
 impl PropertyKey {
-    #[doc = " Produce the string representation of this key."]
+    /// Produce the string representation of this key.
     pub fn as_str(&self) -> String {
         match self {
             PropertyKey::String(s) => s.to_string(),
@@ -32,7 +32,7 @@ impl PropertyKey {
 }
 
 impl PropertyKey {
-    #[doc = " Check if this key is a symbol."]
+    /// Check if this key is a symbol.
     pub fn is_symbol(&self) -> bool {
         matches!(self, PropertyKey::Symbol(_))
     }
@@ -44,8 +44,4 @@ impl From<&str> for PropertyKey {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

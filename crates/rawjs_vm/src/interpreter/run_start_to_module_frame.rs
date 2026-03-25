@@ -90,8 +90,4 @@ pub fn run_module_frame(vm: &mut Vm) -> Result<()> {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

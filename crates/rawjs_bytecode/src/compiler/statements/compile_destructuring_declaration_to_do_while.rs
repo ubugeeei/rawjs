@@ -1,6 +1,6 @@
 impl Compiler {
-    #[doc = " Compile a destructuring pattern for a variable declaration."]
-    #[doc = " Expects the value to destructure on TOS.  Leaves locals on the stack."]
+    /// Compile a destructuring pattern for a variable declaration.
+    /// Expects the value to destructure on TOS.  Leaves locals on the stack.
     pub(crate) fn compile_destructuring_declaration(&mut self, pattern: &Pattern) -> Result<()> {
         match pattern {
             Pattern::Identifier(id) => {
@@ -114,8 +114,4 @@ impl Compiler {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

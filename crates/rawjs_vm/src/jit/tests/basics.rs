@@ -132,5 +132,4 @@ fn test_jit_simple_branch() {
     assert_eq!(result, JsValue::Number(2.0));
 }
 
-#[allow(unused_imports)]
 use super::*;

@@ -130,8 +130,4 @@ pub(super) fn async_reject_callback(
     Ok(JsValue::Undefined)
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

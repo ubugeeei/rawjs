@@ -110,8 +110,4 @@ pub(super) fn drain_microtasks(vm: &mut Vm) -> Result<()> {
     Ok(())
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

@@ -82,7 +82,7 @@ pub(super) fn create_constructor_target(
 /// Execute a function call with `argc` arguments on the stack.
 ///
 /// Stack layout before call:
-///   `[..., function, arg0, arg1, ..., argN-1]`
+///  `[..., function, arg0, arg1, ..., argN-1]`
 pub(crate) fn exec_call(vm: &mut Vm, argc: usize, this_value: JsValue) -> Result<()> {
     let stack_len = vm.value_stack.len();
     if stack_len < argc + 1 {
@@ -193,8 +193,4 @@ pub(crate) fn exec_call(vm: &mut Vm, argc: usize, this_value: JsValue) -> Result
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

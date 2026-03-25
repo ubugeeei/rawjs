@@ -14,5 +14,4 @@ pub struct ExportSpecifier {
     pub location: SourceLocation,
 }
 
-#[allow(unused_imports)]
 use super::*;

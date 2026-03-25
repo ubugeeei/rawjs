@@ -16,21 +16,21 @@ impl fmt::Debug for FunctionKind {
 pub struct Upvalue(pub Rc<RefCell<JsValue>>);
 
 impl Upvalue {
-    #[doc = " Create a new closed upvalue wrapping the given value."]
+    /// Create a new closed upvalue wrapping the given value.
     pub fn new(value: JsValue) -> Self {
         Upvalue(Rc::new(RefCell::new(value)))
     }
 }
 
 impl Upvalue {
-    #[doc = " Read the current value."]
+    /// Read the current value.
     pub fn get(&self) -> JsValue {
         self.0.borrow().clone()
     }
 }
 
 impl Upvalue {
-    #[doc = " Overwrite the value."]
+    /// Overwrite the value.
     pub fn set(&self, value: JsValue) {
         *self.0.borrow_mut() = value;
     }
@@ -54,7 +54,7 @@ pub struct JsObject {
 }
 
 impl JsObject {
-    #[doc = " Create a new ordinary (plain) object."]
+    /// Create a new ordinary (plain) object.
     pub fn ordinary() -> Self {
         let mut object = JsObject {
             properties: HashMap::new(),
@@ -70,7 +70,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Create a new ordinary object with a prototype."]
+    /// Create a new ordinary object with a prototype.
     pub fn with_prototype(proto: GcPtr<JsObject>) -> Self {
         let mut object = JsObject {
             properties: HashMap::new(),
@@ -86,7 +86,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Create a new function object backed by bytecode."]
+    /// Create a new function object backed by bytecode.
     pub fn function(chunk_index: usize, upvalues: Vec<Upvalue>, name: String) -> Self {
         let mut properties = HashMap::new();
         properties.insert(
@@ -111,7 +111,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Create a new native function object."]
+    /// Create a new native function object.
     pub fn native_function(name: impl Into<String>, func: NativeFn) -> Self {
         let name = name.into();
         let mut properties = HashMap::new();
@@ -137,7 +137,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Create a new array object from a list of elements."]
+    /// Create a new array object from a list of elements.
     pub fn array(elements: Vec<JsValue>) -> Self {
         let mut properties = HashMap::new();
         properties.insert(
@@ -158,7 +158,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Create a new error object."]
+    /// Create a new error object.
     pub fn error(message: impl Into<String>) -> Self {
         let msg: String = message.into();
         let mut properties = HashMap::new();
@@ -180,8 +180,4 @@ impl JsObject {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

@@ -1,17 +1,9 @@
-#[path = "opcode/variant.rs"]
 mod variant;
-#[allow(unused_imports)]
 pub use self::variant::Instruction;
-#[allow(unused_imports)]
-use self::variant::*;
-#[path = "opcode/name.rs"]
+pub(crate) use self::variant::*;
 mod name;
-#[allow(unused_imports)]
-use self::name::*;
-#[path = "opcode/instruction_fmt.rs"]
+pub(crate) use self::name::*;
 mod instruction_fmt;
-#[allow(unused_imports)]
-use self::instruction_fmt::*;
+pub(crate) use self::instruction_fmt::*;
 #[cfg(test)]
-#[path = "opcode/tests.rs"]
 mod tests;

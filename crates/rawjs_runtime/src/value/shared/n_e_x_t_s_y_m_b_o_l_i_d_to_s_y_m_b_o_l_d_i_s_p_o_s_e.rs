@@ -16,8 +16,4 @@ pub const SYMBOL_SPECIES: u64 = 5;
 
 pub const SYMBOL_DISPOSE: u64 = 6;
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

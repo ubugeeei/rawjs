@@ -89,8 +89,4 @@ pub struct BinaryExpression {
     pub location: SourceLocation,
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

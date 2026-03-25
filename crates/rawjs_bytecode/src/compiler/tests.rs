@@ -1,57 +1,29 @@
-#[allow(unused_imports)]
 use super::*;
-#[allow(unused_imports)]
-use rawjs_common::SourceLocation;
+pub(crate) use rawjs_common::SourceLocation;
 
-#[path = "tests/loc_to_compile_top_level_await_marks_program_async.rs"]
 mod loc_to_compile_top_level_await_marks_program_async;
-#[allow(unused_imports)]
-use self::loc_to_compile_top_level_await_marks_program_async::*;
-#[path = "tests/compile_await_in_sync_function_still_errors_to_binary_add.rs"]
+pub(crate) use self::loc_to_compile_top_level_await_marks_program_async::*;
 mod compile_await_in_sync_function_still_errors_to_binary_add;
-#[allow(unused_imports)]
-use self::compile_await_in_sync_function_still_errors_to_binary_add::*;
-#[path = "tests/compile_all_binary_ops_to_variable_no_init.rs"]
+pub(crate) use self::compile_await_in_sync_function_still_errors_to_binary_add::*;
 mod compile_all_binary_ops_to_variable_no_init;
-#[allow(unused_imports)]
-use self::compile_all_binary_ops_to_variable_no_init::*;
-#[path = "tests/compile_variable_read_to_do_while_loop.rs"]
+pub(crate) use self::compile_all_binary_ops_to_variable_no_init::*;
 mod compile_variable_read_to_do_while_loop;
-#[allow(unused_imports)]
-use self::compile_variable_read_to_do_while_loop::*;
-#[path = "tests/compile_for_loop_to_function_declaration.rs"]
+pub(crate) use self::compile_variable_read_to_do_while_loop::*;
 mod compile_for_loop_to_function_declaration;
-#[allow(unused_imports)]
-use self::compile_for_loop_to_function_declaration::*;
-#[path = "tests/compile_function_body_correct_to_computed_member.rs"]
+pub(crate) use self::compile_for_loop_to_function_declaration::*;
 mod compile_function_body_correct_to_computed_member;
-#[allow(unused_imports)]
-use self::compile_function_body_correct_to_computed_member::*;
-#[path = "tests/compile_optional_call_to_conditional_expression.rs"]
+pub(crate) use self::compile_function_body_correct_to_computed_member::*;
 mod compile_optional_call_to_conditional_expression;
-#[allow(unused_imports)]
-use self::compile_optional_call_to_conditional_expression::*;
-#[path = "tests/compile_logical_and_to_compound_assignment.rs"]
+pub(crate) use self::compile_optional_call_to_conditional_expression::*;
 mod compile_logical_and_to_compound_assignment;
-#[allow(unused_imports)]
-use self::compile_logical_and_to_compound_assignment::*;
-#[path = "tests/compile_logical_or_assignment_to_sequence.rs"]
+pub(crate) use self::compile_logical_and_to_compound_assignment::*;
 mod compile_logical_or_assignment_to_sequence;
-#[allow(unused_imports)]
-use self::compile_logical_or_assignment_to_sequence::*;
-#[path = "tests/compile_block_scoping_to_disassemble_output.rs"]
+pub(crate) use self::compile_logical_or_assignment_to_sequence::*;
 mod compile_block_scoping_to_disassemble_output;
-#[allow(unused_imports)]
-use self::compile_block_scoping_to_disassemble_output::*;
-#[path = "tests/compile_nested_functions_to_delete_member.rs"]
+pub(crate) use self::compile_block_scoping_to_disassemble_output::*;
 mod compile_nested_functions_to_delete_member;
-#[allow(unused_imports)]
-use self::compile_nested_functions_to_delete_member::*;
-#[path = "tests/compile_delete_non_member_to_labeled_while.rs"]
+pub(crate) use self::compile_nested_functions_to_delete_member::*;
 mod compile_delete_non_member_to_labeled_while;
-#[allow(unused_imports)]
-use self::compile_delete_non_member_to_labeled_while::*;
-#[path = "tests/compile_repl_to_last_expression_result.rs"]
+pub(crate) use self::compile_delete_non_member_to_labeled_while::*;
 mod compile_repl_to_last_expression_result;
-#[allow(unused_imports)]
-use self::compile_repl_to_last_expression_result::*;
+pub(crate) use self::compile_repl_to_last_expression_result::*;

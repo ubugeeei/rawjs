@@ -134,8 +134,4 @@ pub(super) fn run_async_frame(
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

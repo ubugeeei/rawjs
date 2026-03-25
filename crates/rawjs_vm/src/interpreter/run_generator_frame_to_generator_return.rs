@@ -93,8 +93,4 @@ pub(super) fn generator_return(
     make_iterator_result(vm, value, true)
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

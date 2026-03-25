@@ -106,8 +106,4 @@ pub fn promise_resolve_fn(heap: &mut Heap, _this: &JsValue, args: &[JsValue]) ->
     Ok(JsValue::Undefined)
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

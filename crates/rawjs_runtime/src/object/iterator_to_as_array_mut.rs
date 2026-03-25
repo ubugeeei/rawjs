@@ -1,5 +1,5 @@
 impl JsObject {
-    #[doc = " Create a new iterator object from a vector of values."]
+    /// Create a new iterator object from a vector of values.
     pub fn iterator(values: Vec<JsValue>) -> Self {
         let mut object = JsObject {
             properties: HashMap::new(),
@@ -15,7 +15,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Create a new Map object."]
+    /// Create a new Map object.
     pub fn map() -> Self {
         let mut object = JsObject {
             properties: HashMap::new(),
@@ -31,7 +31,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Create a new Promise object."]
+    /// Create a new Promise object.
     pub fn promise() -> Self {
         let mut object = JsObject {
             properties: HashMap::new(),
@@ -47,7 +47,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Create a new Set object."]
+    /// Create a new Set object.
     pub fn set() -> Self {
         let mut object = JsObject {
             properties: HashMap::new(),
@@ -63,7 +63,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Create a typed error object (TypeError, RangeError, etc.)."]
+    /// Create a typed error object (TypeError, RangeError, etc.).
     pub fn typed_error(error_name: &str, message: impl Into<String>) -> Self {
         let msg: String = message.into();
         let mut properties = HashMap::new();
@@ -143,8 +143,4 @@ impl JsObject {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

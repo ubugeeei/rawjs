@@ -127,5 +127,4 @@ fn test_jit_accepts_enter_try() {
     assert!(JitCompiler::compile(&chunk).is_some());
 }
 
-#[allow(unused_imports)]
 use super::*;

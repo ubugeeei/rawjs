@@ -1,5 +1,5 @@
 impl Heap {
-    #[doc = " Force a full collection and return the number of freed objects."]
+    /// Force a full collection and return the number of freed objects.
     pub fn force_collect(&mut self) -> usize {
         let before = self.allocations.len();
         self.collect();
@@ -107,5 +107,4 @@ mod tests {
     }
 }
 
-#[allow(unused_imports)]
 use super::*;

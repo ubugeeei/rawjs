@@ -117,5 +117,4 @@ mod shape_tests {
     }
 }
 
-#[allow(unused_imports)]
 use super::*;

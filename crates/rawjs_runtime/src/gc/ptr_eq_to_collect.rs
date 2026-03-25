@@ -1,12 +1,12 @@
 impl<T> GcPtr<T> {
-    #[doc = " Check pointer identity (same allocation)."]
+    /// Check pointer identity (same allocation).
     pub fn ptr_eq(&self, other: &GcPtr<T>) -> bool {
         Rc::ptr_eq(&self.inner, &other.inner)
     }
 }
 
 impl<T> GcPtr<T> {
-    #[doc = " Return a stable address for identity-based maps and sets."]
+    /// Return a stable address for identity-based maps and sets.
     pub fn addr(&self) -> usize {
         Rc::as_ptr(&self.inner) as usize
     }
@@ -62,7 +62,7 @@ pub struct Heap {
 }
 
 impl Heap {
-    #[doc = " Default initial threshold before first GC."]
+    /// Default initial threshold before first GC.
     const INITIAL_THRESHOLD: usize = 256;
 }
 
@@ -81,7 +81,7 @@ impl Heap {
 }
 
 impl Heap {
-    #[doc = " Allocate a new `JsObject` on the heap and return a `GcPtr` to it."]
+    /// Allocate a new `JsObject` on the heap and return a `GcPtr` to it.
     pub fn alloc(&mut self, object: JsObject) -> GcPtr<JsObject> {
         let ptr = GcPtr::new(object);
         self.allocations.push(ptr.clone());
@@ -90,27 +90,27 @@ impl Heap {
 }
 
 impl Heap {
-    #[doc = " Return the number of tracked allocations."]
+    /// Return the number of tracked allocations.
     pub fn allocation_count(&self) -> usize {
         self.allocations.len()
     }
 }
 
 impl Heap {
-    #[doc = " Should we attempt collection?"]
+    /// Should we attempt collection?
     pub fn should_collect(&self) -> bool {
         self.allocations.len() >= self.next_gc
     }
 }
 
 impl Heap {
-    #[doc = " Simple collection: drop allocations whose only strong reference"]
-    #[doc = " is the one held by the heap itself (i.e. ref_count == 1 means"]
-    #[doc = " nobody else references it)."]
-    #[doc = ""]
-    #[doc = " This is a conservative sweep that works with `Rc` backing."]
-    #[doc = " It will NOT collect reference cycles between GC objects; a"]
-    #[doc = " proper tracing collector would replace this."]
+    /// Simple collection: drop allocations whose only strong reference
+    /// is the one held by the heap itself (i.e. ref_count == 1 means
+    /// nobody else references it).
+    ///
+    /// This is a conservative sweep that works with `Rc` backing.
+    /// It will NOT collect reference cycles between GC objects; a
+    /// proper tracing collector would replace this.
     pub fn collect(&mut self) {
         let before = self.allocations.len();
         self.allocations.retain(|ptr| ptr.ref_count() > 1);
@@ -120,8 +120,4 @@ impl Heap {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

@@ -132,8 +132,4 @@ fn compile_function_declaration() {
     assert!(has_func, "Should have a function constant");
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

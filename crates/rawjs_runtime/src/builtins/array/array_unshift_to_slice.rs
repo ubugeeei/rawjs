@@ -104,8 +104,4 @@ pub(super) fn array_slice(heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> 
     Ok(JsValue::Object(arr))
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

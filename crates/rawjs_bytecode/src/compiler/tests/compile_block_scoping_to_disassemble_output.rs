@@ -149,8 +149,4 @@ fn compile_disassemble_output() {
     assert!(disasm.contains("ADD"));
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

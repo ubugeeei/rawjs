@@ -111,8 +111,4 @@ pub(super) fn create_async_result_promise(vm: &mut Vm) -> GcPtr<JsObject> {
     vm.create_promise_object()
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

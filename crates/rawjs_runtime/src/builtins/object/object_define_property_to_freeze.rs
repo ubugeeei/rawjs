@@ -117,8 +117,4 @@ pub(super) fn object_freeze(
     Ok(JsValue::Object(target))
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

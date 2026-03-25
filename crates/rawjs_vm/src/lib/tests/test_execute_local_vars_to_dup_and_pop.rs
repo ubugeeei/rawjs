@@ -118,5 +118,4 @@ fn test_execute_dup_and_pop() {
     assert_eq!(result, JsValue::Number(5.0));
 }
 
-#[allow(unused_imports)]
 use super::*;

@@ -12,9 +12,9 @@ impl Compiler {
 }
 
 impl Compiler {
-    #[doc = " Resolve a name to an upvalue index by searching the parallel"]
-    #[doc = " `upvalue_names` vector.  This only finds upvalues that were"]
-    #[doc = " previously registered via `add_upvalue`."]
+    /// Resolve a name to an upvalue index by searching the parallel
+    /// `upvalue_names` vector.  This only finds upvalues that were
+    /// previously registered via `add_upvalue`.
     pub(crate) fn resolve_upvalue(&mut self, name: &str) -> Option<u16> {
         for (i, uv_name) in self.upvalue_names.iter().enumerate() {
             if uv_name == name {
@@ -44,8 +44,8 @@ impl Compiler {
 }
 
 impl Compiler {
-    #[doc = " Register a new upvalue (or return the index of an existing identical one)."]
-    #[doc = " Used when compiling closures that capture variables from enclosing scopes."]
+    /// Register a new upvalue (or return the index of an existing identical one).
+    /// Used when compiling closures that capture variables from enclosing scopes.
     pub(crate) fn add_upvalue(&mut self, name: &str, desc: UpvalueDesc) -> u16 {
         for (i, existing) in self.upvalues.iter().enumerate() {
             if existing.index == desc.index && existing.is_local == desc.is_local {
@@ -143,8 +143,4 @@ impl Compiler {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

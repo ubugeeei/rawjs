@@ -105,8 +105,4 @@ pub(super) fn execute_exception_instruction(
     Ok(InstructionOutcome::Handled(None))
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

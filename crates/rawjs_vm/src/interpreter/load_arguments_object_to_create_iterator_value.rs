@@ -101,8 +101,4 @@ pub(super) fn create_iterator_value(vm: &mut Vm, obj_val: JsValue) -> Result<JsV
     Ok(JsValue::Object(vm.heap.alloc(JsObject::iterator(values))))
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

@@ -54,5 +54,4 @@ pub(super) fn jit_execute_via_vm(chunk: Chunk, args: &[JsValue]) -> JsValue {
     vm.value_stack.pop().unwrap_or(JsValue::Undefined)
 }
 
-#[allow(unused_imports)]
 use super::*;

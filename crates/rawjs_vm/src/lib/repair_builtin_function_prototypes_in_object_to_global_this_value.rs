@@ -71,7 +71,7 @@ impl Vm {
 }
 
 impl Vm {
-    #[doc = " Register a chunk in the VM and return its index."]
+    /// Register a chunk in the VM and return its index.
     pub fn add_chunk(&mut self, chunk: Chunk) -> usize {
         let idx = self.chunks.len();
         self.chunks.push(chunk);
@@ -80,7 +80,7 @@ impl Vm {
 }
 
 impl Vm {
-    #[doc = " Borrow a chunk by index."]
+    /// Borrow a chunk by index.
     #[allow(dead_code)]
     pub(crate) fn chunk(&self, index: usize) -> &Chunk {
         &self.chunks[index]
@@ -88,10 +88,10 @@ impl Vm {
 }
 
 impl Vm {
-    #[doc = " Execute a top-level chunk."]
-    #[doc = ""]
-    #[doc = " Creates an initial call frame, runs the interpreter loop, and returns"]
-    #[doc = " the final value left on the stack (or `undefined`)."]
+    /// Execute a top-level chunk.
+    ///
+    /// Creates an initial call frame, runs the interpreter loop, and returns
+    /// the final value left on the stack (or `undefined`).
     pub fn execute(&mut self, chunk: Chunk) -> Result<JsValue> {
         let chunk_index = self.add_chunk(chunk);
         if self.chunks[chunk_index].is_async {
@@ -116,21 +116,21 @@ impl Vm {
 }
 
 impl Vm {
-    #[doc = " Main execution loop -- delegates to the interpreter."]
+    /// Main execution loop -- delegates to the interpreter.
     pub fn run(&mut self) -> Result<JsValue> {
         interpreter::run(self)
     }
 }
 
 impl Vm {
-    #[doc = " Get a global variable by name."]
+    /// Get a global variable by name.
     pub fn get_global(&self, name: &str) -> Option<&JsValue> {
         self.globals.get(name)
     }
 }
 
 impl Vm {
-    #[doc = " Set (or create) a global variable."]
+    /// Set (or create) a global variable.
     pub fn set_global(&mut self, name: String, value: JsValue) {
         self.globals.insert(name.clone(), value.clone());
         if let Some(ref global_obj) = self.global_object {
@@ -140,7 +140,7 @@ impl Vm {
 }
 
 impl Vm {
-    #[doc = " Delete a global variable. Returns `true` if it existed."]
+    /// Delete a global variable. Returns `true` if it existed.
     pub(crate) fn delete_global(&mut self, name: &str) -> bool {
         let existed = self.globals.remove(name).is_some();
         if let Some(ref global_obj) = self.global_object {
@@ -151,7 +151,7 @@ impl Vm {
 }
 
 impl Vm {
-    #[doc = " Get the current global `this` value."]
+    /// Get the current global `this` value.
     pub(crate) fn global_this_value(&self) -> JsValue {
         self.global_object
             .as_ref()
@@ -160,8 +160,4 @@ impl Vm {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

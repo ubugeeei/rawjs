@@ -86,8 +86,4 @@ pub(crate) fn exec_new(vm: &mut Vm, argc: usize) -> Result<()> {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

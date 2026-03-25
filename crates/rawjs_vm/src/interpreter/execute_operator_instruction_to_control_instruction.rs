@@ -84,8 +84,4 @@ pub(super) fn execute_control_instruction(
     Ok(InstructionOutcome::Handled(None))
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

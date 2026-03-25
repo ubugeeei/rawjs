@@ -22,7 +22,7 @@ impl Vm {
 }
 
 impl Vm {
-    #[doc = " Increment the execution count for a chunk and return the new count."]
+    /// Increment the execution count for a chunk and return the new count.
     pub(crate) fn bump_execution_count(&mut self, chunk_index: usize) -> u32 {
         let count = self.execution_counts.entry(chunk_index).or_insert(0);
         *count += 1;
@@ -31,14 +31,14 @@ impl Vm {
 }
 
 impl Vm {
-    #[doc = " Check if a JIT-compiled version exists for a chunk."]
+    /// Check if a JIT-compiled version exists for a chunk.
     pub(crate) fn has_jit(&self, chunk_index: usize) -> bool {
         self.jit_cache.contains_key(&chunk_index)
     }
 }
 
 impl Vm {
-    #[doc = " Attempt to JIT-compile a chunk.  Returns `true` on success."]
+    /// Attempt to JIT-compile a chunk.  Returns `true` on success.
     pub(crate) fn try_jit_compile(&mut self, chunk_index: usize) -> bool {
         if self.jit_cache.contains_key(&chunk_index) {
             return true;
@@ -55,19 +55,19 @@ impl Vm {
 }
 
 impl Vm {
-    #[doc = " Execute a JIT-compiled function for the current top-of-stack call frame."]
-    #[doc = ""]
-    #[doc = " The caller must have already pushed a `CallFrame` onto `call_stack`."]
-    #[doc = " The JIT function will execute the frame via stub calls and pop it"]
-    #[doc = " on return."]
-    #[doc = ""]
-    #[doc = " Returns `Ok(())` on success (result is on `value_stack`)."]
-    #[doc = " Returns `Err` on failure (details in `jit_error`)."]
-    #[doc = ""]
-    #[doc = " # Safety"]
-    #[doc = ""]
-    #[doc = " The JIT function pointer must have been produced by `JitCompiler` and"]
-    #[doc = " must still be mapped and valid."]
+    /// Execute a JIT-compiled function for the current top-of-stack call frame.
+    ///
+    /// The caller must have already pushed a `CallFrame` onto `call_stack`.
+    /// The JIT function will execute the frame via stub calls and pop it
+    /// on return.
+    ///
+    /// Returns `Ok(())` on success (result is on `value_stack`).
+    /// Returns `Err` on failure (details in `jit_error`).
+    ///
+    /// # Safety
+    ///
+    /// The JIT function pointer must have been produced by `JitCompiler` and
+    /// must still be mapped and valid.
     pub(crate) unsafe fn call_jit_new(&mut self, chunk_index: usize) -> u32 {
         if let Some(func) = self.jit_cache.get(&chunk_index) {
             let func_ptr = func.code;
@@ -104,8 +104,4 @@ impl Vm {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

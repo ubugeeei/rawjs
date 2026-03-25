@@ -40,7 +40,7 @@ impl IteratorState {
 }
 
 impl IteratorState {
-    #[doc = " Advance the iterator and return `(value, done)`."]
+    /// Advance the iterator and return `(value, done)`.
     pub fn advance(&mut self) -> (JsValue, bool) {
         if self.index >= self.values.len() {
             (JsValue::Undefined, true)
@@ -144,8 +144,4 @@ pub enum FunctionKind {
 /// Returns a `Result<JsValue>`.
 pub type NativeFn = fn(&mut Heap, &JsValue, &[JsValue]) -> Result<JsValue>;
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

@@ -63,5 +63,4 @@ fn test_execute_generator_next_survives_nested_call() {
     assert_eq!(done, JsValue::Boolean(true));
 }
 
-#[allow(unused_imports)]
 use super::*;

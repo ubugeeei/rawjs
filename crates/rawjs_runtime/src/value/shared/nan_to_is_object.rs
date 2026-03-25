@@ -1,26 +1,26 @@
 impl JsValue {
-    #[doc = " The JS value `NaN`."]
+    /// The JS value `NaN`.
     pub fn nan() -> Self {
         JsValue::Number(f64::NAN)
     }
 }
 
 impl JsValue {
-    #[doc = " The JS value `+Infinity`."]
+    /// The JS value `+Infinity`.
     pub fn infinity() -> Self {
         JsValue::Number(f64::INFINITY)
     }
 }
 
 impl JsValue {
-    #[doc = " The JS value `-Infinity`."]
+    /// The JS value `-Infinity`.
     pub fn neg_infinity() -> Self {
         JsValue::Number(f64::NEG_INFINITY)
     }
 }
 
 impl JsValue {
-    #[doc = " The JS value `0`."]
+    /// The JS value `0`.
     pub fn zero() -> Self {
         JsValue::Number(0.0)
     }
@@ -74,8 +74,4 @@ impl JsValue {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

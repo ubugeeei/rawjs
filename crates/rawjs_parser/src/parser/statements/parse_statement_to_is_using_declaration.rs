@@ -144,9 +144,9 @@ impl Parser {
 }
 
 impl Parser {
-    #[doc = " Check if current `using` identifier starts a `using` declaration."]
-    #[doc = " `using` is a contextual keyword, so we need to check that the next token"]
-    #[doc = " is an identifier (the binding name), not an operator or semicolon."]
+    /// Check if current `using` identifier starts a `using` declaration.
+    /// `using` is a contextual keyword, so we need to check that the next token
+    /// is an identifier (the binding name), not an operator or semicolon.
     pub(super) fn is_using_declaration(&self) -> bool {
         if self.pos + 1 >= self.tokens.len() {
             return false;
@@ -156,8 +156,4 @@ impl Parser {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

@@ -1,37 +1,19 @@
-#[allow(unused_imports)]
-use super::helpers;
-#[allow(unused_imports)]
-use super::helpers::set_native;
-#[allow(unused_imports)]
-use crate::gc::{GcPtr, Heap};
-#[allow(unused_imports)]
-use crate::object::{JsObject, ObjectInternal};
-#[allow(unused_imports)]
-use crate::value::JsValue;
-#[allow(unused_imports)]
-use rawjs_common::{RawJsError, Result};
+pub(crate) use super::helpers;
+pub(crate) use super::helpers::set_native;
+pub(crate) use crate::gc::{GcPtr, Heap};
+pub(crate) use crate::object::{JsObject, ObjectInternal};
+pub(crate) use crate::value::JsValue;
+pub(crate) use rawjs_common::{RawJsError, Result};
 
-#[path = "object/create_object_prototype_to_constructor.rs"]
 mod create_object_prototype_to_constructor;
-#[allow(unused_imports)]
 pub use self::create_object_prototype_to_constructor::*;
-#[allow(unused_imports)]
-use self::create_object_prototype_to_constructor::*;
-#[path = "object/object_constructor_to_assign.rs"]
+pub(crate) use self::create_object_prototype_to_constructor::*;
 mod object_constructor_to_assign;
-#[allow(unused_imports)]
 pub use self::object_constructor_to_assign::*;
-#[allow(unused_imports)]
-use self::object_constructor_to_assign::*;
-#[path = "object/object_define_property_to_freeze.rs"]
+pub(crate) use self::object_constructor_to_assign::*;
 mod object_define_property_to_freeze;
-#[allow(unused_imports)]
 pub use self::object_define_property_to_freeze::*;
-#[allow(unused_imports)]
-use self::object_define_property_to_freeze::*;
-#[path = "object/object_create_to_tests.rs"]
+pub(crate) use self::object_define_property_to_freeze::*;
 mod object_create_to_tests;
-#[allow(unused_imports)]
 pub use self::object_create_to_tests::*;
-#[allow(unused_imports)]
-use self::object_create_to_tests::*;
+pub(crate) use self::object_create_to_tests::*;

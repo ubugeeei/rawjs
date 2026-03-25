@@ -1,10 +1,10 @@
 /// Execute a single instruction.
 ///
 /// Returns:
-///   - `Ok(Some(value))` when the *top-level* frame executes a `Return`,
-///     signalling the end of the program.
-///   - `Ok(None)` for normal continuation.
-///   - `Err(e)` for runtime errors (type errors, reference errors, etc.).
+///  - `Ok(Some(value))` when the *top-level* frame executes a `Return`,
+///    signalling the end of the program.
+///  - `Ok(None)` for normal continuation.
+///  - `Err(e)` for runtime errors (type errors, reference errors, etc.).
 pub(super) fn execute_instruction(vm: &mut Vm, instr: Instruction) -> Result<Option<JsValue>> {
     for outcome in [
         execute_data_instruction(vm, instr)?,
@@ -109,8 +109,4 @@ pub(super) fn execute_data_instruction(
     Ok(InstructionOutcome::Handled(None))
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

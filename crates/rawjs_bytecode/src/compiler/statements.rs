@@ -1,37 +1,19 @@
-#[allow(unused_imports)]
-use super::{expression_to_property_name, Compiler, LocalStorage};
-#[allow(unused_imports)]
-use crate::opcode::Instruction;
-#[allow(unused_imports)]
-use rawjs_ast::*;
-#[allow(unused_imports)]
-use rawjs_common::{RawJsError, Result};
+pub(crate) use super::{expression_to_property_name, Compiler, LocalStorage};
+pub(crate) use crate::opcode::Instruction;
+pub(crate) use rawjs_ast::*;
+pub(crate) use rawjs_common::{RawJsError, Result};
 
-#[path = "statements/compile_statement_to_variable_declaration.rs"]
 mod compile_statement_to_variable_declaration;
-#[allow(unused_imports)]
-use self::compile_statement_to_variable_declaration::*;
-#[path = "statements/compile_destructuring_declaration_to_do_while.rs"]
+pub(crate) use self::compile_statement_to_variable_declaration::*;
 mod compile_destructuring_declaration_to_do_while;
-#[allow(unused_imports)]
-use self::compile_destructuring_declaration_to_do_while::*;
-#[path = "statements/compile_for_start_to_in.rs"]
+pub(crate) use self::compile_destructuring_declaration_to_do_while::*;
 mod compile_for_start_to_in;
-#[allow(unused_imports)]
-use self::compile_for_start_to_in::*;
-#[path = "statements/compile_for_of_to_continue.rs"]
+pub(crate) use self::compile_for_start_to_in::*;
 mod compile_for_of_to_continue;
-#[allow(unused_imports)]
-use self::compile_for_of_to_continue::*;
-#[path = "statements/compile_switch_to_try.rs"]
+pub(crate) use self::compile_for_of_to_continue::*;
 mod compile_switch_to_try;
-#[allow(unused_imports)]
-use self::compile_switch_to_try::*;
-#[path = "statements/compile_labeled_to_class_body.rs"]
+pub(crate) use self::compile_switch_to_try::*;
 mod compile_labeled_to_class_body;
-#[allow(unused_imports)]
-use self::compile_labeled_to_class_body::*;
-#[path = "statements/compile_import_to_export.rs"]
+pub(crate) use self::compile_labeled_to_class_body::*;
 mod compile_import_to_export;
-#[allow(unused_imports)]
-use self::compile_import_to_export::*;
+pub(crate) use self::compile_import_to_export::*;

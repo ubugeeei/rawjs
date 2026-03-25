@@ -132,5 +132,4 @@ fn test_execute_nested_function_uses_own_arguments_object() {
     assert_eq!(result, JsValue::Number(0.0));
 }
 
-#[allow(unused_imports)]
 use super::*;

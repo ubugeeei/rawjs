@@ -1,5 +1,5 @@
 impl JsObject {
-    #[doc = " Get a named property, walking the prototype chain."]
+    /// Get a named property, walking the prototype chain.
     pub fn get_property(&self, name: &str) -> JsValue {
         if let Some(prop) = self.properties.get(name) {
             return prop.value.clone();
@@ -32,14 +32,14 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Set a named property."]
+    /// Set a named property.
     pub fn set_property(&mut self, name: String, value: JsValue) {
         let _ = self.try_set_property(name, value);
     }
 }
 
 impl JsObject {
-    #[doc = " Attempt to set a named property. Returns `false` if the write is rejected."]
+    /// Attempt to set a named property. Returns `false` if the write is rejected.
     pub fn try_set_property(&mut self, name: String, value: JsValue) -> bool {
         if let Some(existing) = self.properties.get(&name) {
             if !existing.writable {
@@ -75,7 +75,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Get a symbol-keyed property, walking the prototype chain."]
+    /// Get a symbol-keyed property, walking the prototype chain.
     pub fn get_symbol_property(&self, symbol_id: u64) -> JsValue {
         if let Some(prop) = self.symbol_properties.get(&symbol_id) {
             return prop.value.clone();
@@ -88,7 +88,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Set a symbol-keyed property."]
+    /// Set a symbol-keyed property.
     pub fn set_symbol_property(&mut self, symbol_id: u64, value: JsValue) {
         let is_new = !self.symbol_properties.contains_key(&symbol_id);
         self.symbol_properties
@@ -100,7 +100,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Set a property with full descriptor control."]
+    /// Set a property with full descriptor control.
     pub fn define_property(&mut self, name: String, prop: Property) {
         let is_new = !self.properties.contains_key(&name);
         self.properties.insert(name, prop);
@@ -111,7 +111,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Get an own property descriptor, if any."]
+    /// Get an own property descriptor, if any.
     pub fn get_own_property_descriptor(&self, name: &str) -> Option<Property> {
         if let Some(prop) = self.properties.get(name) {
             return Some(prop.clone());
@@ -128,7 +128,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Get a property descriptor, walking the prototype chain."]
+    /// Get a property descriptor, walking the prototype chain.
     pub fn get_property_descriptor(&self, name: &str) -> Option<Property> {
         if let Some(prop) = self.properties.get(name) {
             return Some(prop.clone());
@@ -141,7 +141,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Get an array element by index."]
+    /// Get an array element by index.
     pub fn get_index(&self, idx: u32) -> JsValue {
         if let ObjectInternal::Array(ref elements) = self.internal {
             if (idx as usize) < elements.len() {
@@ -153,7 +153,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Set an array element by index."]
+    /// Set an array element by index.
     pub fn set_index(&mut self, idx: u32, value: JsValue) {
         if let ObjectInternal::Array(ref mut elements) = self.internal {
             let i = idx as usize;
@@ -171,8 +171,4 @@ impl JsObject {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

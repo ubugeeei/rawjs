@@ -43,5 +43,4 @@ impl std::fmt::Display for Instruction {
     }
 }
 
-#[allow(unused_imports)]
 use super::*;

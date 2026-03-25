@@ -30,8 +30,8 @@ impl LineEditor {
 }
 
 impl LineEditor {
-    #[doc = " Read a line of input with line editing and history support."]
-    #[doc = " Returns None on EOF (Ctrl-D)."]
+    /// Read a line of input with line editing and history support.
+    /// Returns None on EOF (Ctrl-D).
     pub(super) fn read_line(&mut self, prompt: &str) -> Option<String> {
         let stdout = io::stdout();
         let mut stdout = stdout.lock();
@@ -218,8 +218,4 @@ impl LineEditor {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

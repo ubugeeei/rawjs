@@ -15,7 +15,7 @@ pub(super) fn has_use_strict_directive(statements: &[Statement]) -> bool {
 }
 
 /// Extract a property name from an expression that is used as an object key.
-pub(super) fn expression_to_property_name(expr: &Expression) -> Result<String> {
+pub(crate) fn expression_to_property_name(expr: &Expression) -> Result<String> {
     match expr {
         Expression::Identifier(id) => Ok(id.name.clone()),
         Expression::StringLiteral(s) => Ok(s.value.clone()),
@@ -36,8 +36,4 @@ pub(super) fn pattern_to_name(pat: &Pattern) -> String {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

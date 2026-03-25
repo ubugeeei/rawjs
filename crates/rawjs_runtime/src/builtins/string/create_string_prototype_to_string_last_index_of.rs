@@ -135,8 +135,4 @@ pub(super) fn string_last_index_of(
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

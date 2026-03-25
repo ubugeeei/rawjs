@@ -142,8 +142,4 @@ pub(super) fn generator_next(
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

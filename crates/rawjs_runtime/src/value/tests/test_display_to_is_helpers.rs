@@ -21,8 +21,4 @@ fn test_is_helpers() {
     assert!(!JsValue::Number(1.0).is_nan());
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

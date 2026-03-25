@@ -151,5 +151,4 @@ fn test_execute_native_methods_inherit_function_prototype_call() {
     assert_eq!(result, JsValue::Boolean(true));
 }
 
-#[allow(unused_imports)]
 use super::*;

@@ -1,5 +1,5 @@
 impl JsValue {
-    #[doc = " `>`"]
+    /// `>`
     pub fn gt(&self, other: &JsValue) -> JsValue {
         match other.abstract_relational(self) {
             Some(true) => JsValue::Boolean(true),
@@ -9,7 +9,7 @@ impl JsValue {
 }
 
 impl JsValue {
-    #[doc = " `>=`"]
+    /// `>=`
     pub fn ge(&self, other: &JsValue) -> JsValue {
         match self.abstract_relational(other) {
             Some(true) => JsValue::Boolean(false),
@@ -20,16 +20,16 @@ impl JsValue {
 }
 
 impl JsValue {
-    #[doc = " `!` (logical NOT) -- always returns a boolean."]
+    /// `!` (logical NOT) -- always returns a boolean.
     pub fn logical_not(&self) -> JsValue {
         JsValue::Boolean(!self.to_boolean())
     }
 }
 
 impl JsValue {
-    #[doc = " Check if this value is an instance of the given constructor object."]
-    #[doc = " Simplified: walks the prototype chain of `self` looking for"]
-    #[doc = " `constructor.prototype`."]
+    /// Check if this value is an instance of the given constructor object.
+    /// Simplified: walks the prototype chain of `self` looking for
+    /// `constructor.prototype`.
     pub fn instance_of(&self, constructor: &JsValue) -> bool {
         let obj_ptr = match self {
             JsValue::Object(ptr) => ptr.clone(),
@@ -55,8 +55,4 @@ impl JsValue {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

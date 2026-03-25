@@ -103,8 +103,4 @@ pub struct Vm {
     pub(crate) module_exports: Option<GcPtr<JsObject>>,
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

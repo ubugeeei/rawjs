@@ -1,15 +1,15 @@
 impl Compiler {
-    #[doc = " Compile a parsed program into a top-level bytecode chunk."]
+    /// Compile a parsed program into a top-level bytecode chunk.
     pub fn compile_program(program: &Program) -> Result<Chunk> {
         Self::compile_program_with_mode(program, false)
     }
 }
 
 impl Compiler {
-    #[doc = " Compile a parsed program for the REPL."]
-    #[doc = ""]
-    #[doc = " If the last top-level statement is an expression statement, the REPL"]
-    #[doc = " returns that value instead of discarding it."]
+    /// Compile a parsed program for the REPL.
+    ///
+    /// If the last top-level statement is an expression statement, the REPL
+    /// returns that value instead of discarding it.
     pub fn compile_repl_program(program: &Program) -> Result<Chunk> {
         Self::compile_program_with_mode(program, true)
     }
@@ -124,9 +124,9 @@ impl Compiler {
 }
 
 impl Compiler {
-    #[doc = " Remove locals whose depth >= `min_depth` from the compiler's tracking."]
-    #[doc = " Since the VM uses a separate locals vector (not the operand stack),"]
-    #[doc = " we do NOT emit Pop instructions here."]
+    /// Remove locals whose depth >= `min_depth` from the compiler's tracking.
+    /// Since the VM uses a separate locals vector (not the operand stack),
+    /// we do NOT emit Pop instructions here.
     pub(crate) fn pop_locals_to_depth(&mut self, min_depth: u32) {
         while let Some(local) = self.locals.last() {
             if local.depth < min_depth {
@@ -138,8 +138,8 @@ impl Compiler {
 }
 
 impl Compiler {
-    #[doc = " Declare a local in the current scope, push `Undefined` as placeholder,"]
-    #[doc = " and return its slot index."]
+    /// Declare a local in the current scope, push `Undefined` as placeholder,
+    /// and return its slot index.
     pub(crate) fn declare_local(&mut self, name: &str) -> Result<u16> {
         self.declare_local_with_storage(name, LocalStorage::Local)
     }
@@ -182,7 +182,7 @@ impl Compiler {
 }
 
 impl Compiler {
-    #[doc = " Resolve a name to a local slot index."]
+    /// Resolve a name to a local slot index.
     pub(crate) fn resolve_local(&self, name: &str) -> Option<u16> {
         for (i, local) in self.locals.iter().enumerate().rev() {
             if local.name == name {
@@ -193,8 +193,4 @@ impl Compiler {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

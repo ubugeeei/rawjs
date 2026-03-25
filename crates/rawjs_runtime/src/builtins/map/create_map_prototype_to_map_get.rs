@@ -106,8 +106,4 @@ pub(super) fn map_get(_heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> Res
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

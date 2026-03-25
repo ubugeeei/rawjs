@@ -124,8 +124,4 @@ pub(super) fn delete_property(vm: &mut Vm, obj_val: JsValue, key: JsValue) -> bo
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

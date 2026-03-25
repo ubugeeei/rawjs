@@ -112,8 +112,4 @@ pub(super) fn exec_promise_constructor(vm: &mut Vm, args: &[JsValue]) -> Result<
     Ok(())
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

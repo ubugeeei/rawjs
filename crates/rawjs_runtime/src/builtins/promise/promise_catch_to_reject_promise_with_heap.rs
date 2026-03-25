@@ -81,8 +81,4 @@ pub fn reject_promise_with_heap(promise_ptr: &GcPtr<JsObject>, value: JsValue, h
     reject_promise_impl(promise_ptr, value, Some(heap));
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

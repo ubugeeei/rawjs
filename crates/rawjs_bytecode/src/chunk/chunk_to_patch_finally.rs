@@ -41,7 +41,7 @@ pub enum Constant {
 }
 
 impl Chunk {
-    #[doc = " Create a new empty chunk with the given name."]
+    /// Create a new empty chunk with the given name.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             instructions: Vec::new(),
@@ -59,7 +59,7 @@ impl Chunk {
 }
 
 impl Chunk {
-    #[doc = " Append an instruction and return its index in the instruction vector."]
+    /// Append an instruction and return its index in the instruction vector.
     pub fn emit(&mut self, instruction: Instruction) -> usize {
         let idx = self.instructions.len();
         self.instructions.push(instruction);
@@ -68,8 +68,8 @@ impl Chunk {
 }
 
 impl Chunk {
-    #[doc = " Add a constant to the pool and return its index."]
-    #[doc = " Returns `None` if the pool would exceed u16::MAX entries."]
+    /// Add a constant to the pool and return its index.
+    /// Returns `None` if the pool would exceed u16::MAX entries.
     pub fn add_constant(&mut self, constant: Constant) -> Option<u16> {
         for (i, existing) in self.constants.iter().enumerate() {
             if constant.eq_value(existing) {
@@ -86,14 +86,14 @@ impl Chunk {
 }
 
 impl Chunk {
-    #[doc = " Return the current instruction count (useful for computing jump offsets)."]
+    /// Return the current instruction count (useful for computing jump offsets).
     pub fn current_offset(&self) -> usize {
         self.instructions.len()
     }
 }
 
 impl Chunk {
-    #[doc = " Patch a jump instruction at `index` with the given signed `offset`."]
+    /// Patch a jump instruction at `index` with the given signed `offset`.
     pub fn patch_jump(&mut self, index: usize, offset: i32) {
         match &mut self.instructions[index] {
             Instruction::Jump(ref mut o) => *o = offset,
@@ -110,7 +110,7 @@ impl Chunk {
 }
 
 impl Chunk {
-    #[doc = " Patch the *finally* offset of an `EnterTry` instruction at `index`."]
+    /// Patch the *finally* offset of an `EnterTry` instruction at `index`.
     pub fn patch_finally(&mut self, index: usize, offset: i32) {
         match &mut self.instructions[index] {
             Instruction::EnterTry(_, ref mut finally_o) => *finally_o = offset,
@@ -122,8 +122,4 @@ impl Chunk {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

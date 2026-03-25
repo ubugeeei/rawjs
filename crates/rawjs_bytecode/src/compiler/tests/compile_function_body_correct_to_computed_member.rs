@@ -113,8 +113,4 @@ fn compile_computed_member() {
     assert_eq!(chunk.instructions[2], Instruction::GetComputed);
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

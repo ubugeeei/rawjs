@@ -123,8 +123,4 @@ fn compile_variable_no_init() {
     assert_eq!(chunk.instructions[0], Instruction::Undefined);
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

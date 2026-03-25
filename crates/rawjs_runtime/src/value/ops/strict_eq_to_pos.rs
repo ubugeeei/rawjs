@@ -3,7 +3,7 @@ use std::rc::Rc;
 use super::JsValue;
 
 impl JsValue {
-    #[doc = " Strict equality (`===`)."]
+    /// Strict equality (`===`).
     pub fn strict_eq(&self, other: &JsValue) -> bool {
         match (self, other) {
             (JsValue::Undefined, JsValue::Undefined) => true,
@@ -24,7 +24,7 @@ impl JsValue {
 }
 
 impl JsValue {
-    #[doc = " Abstract equality (`==`)."]
+    /// Abstract equality (`==`).
     pub fn abstract_eq(&self, other: &JsValue) -> bool {
         match (self, other) {
             (JsValue::Undefined, JsValue::Undefined) => true,
@@ -57,8 +57,8 @@ impl JsValue {
 }
 
 impl JsValue {
-    #[doc = " The `+` operator."]
-    #[doc = " If either operand is a string, concatenation is performed."]
+    /// The `+` operator.
+    /// If either operand is a string, concatenation is performed.
     pub fn add(&self, other: &JsValue) -> JsValue {
         if self.is_string() || other.is_string() {
             let ls = self.to_string_value();
@@ -75,28 +75,28 @@ impl JsValue {
 }
 
 impl JsValue {
-    #[doc = " The `-` operator."]
+    /// The `-` operator.
     pub fn sub(&self, other: &JsValue) -> JsValue {
         JsValue::Number(self.to_number() - other.to_number())
     }
 }
 
 impl JsValue {
-    #[doc = " The `*` operator."]
+    /// The `*` operator.
     pub fn mul(&self, other: &JsValue) -> JsValue {
         JsValue::Number(self.to_number() * other.to_number())
     }
 }
 
 impl JsValue {
-    #[doc = " The `/` operator."]
+    /// The `/` operator.
     pub fn div(&self, other: &JsValue) -> JsValue {
         JsValue::Number(self.to_number() / other.to_number())
     }
 }
 
 impl JsValue {
-    #[doc = " The `%` operator."]
+    /// The `%` operator.
     pub fn rem(&self, other: &JsValue) -> JsValue {
         let a = self.to_number();
         let b = other.to_number();
@@ -108,28 +108,24 @@ impl JsValue {
 }
 
 impl JsValue {
-    #[doc = " The `**` operator (exponentiation)."]
+    /// The `**` operator (exponentiation).
     pub fn exp(&self, other: &JsValue) -> JsValue {
         JsValue::Number(self.to_number().powf(other.to_number()))
     }
 }
 
 impl JsValue {
-    #[doc = " Unary `-`."]
+    /// Unary `-`.
     pub fn neg(&self) -> JsValue {
         JsValue::Number(-self.to_number())
     }
 }
 
 impl JsValue {
-    #[doc = " Unary `+`."]
+    /// Unary `+`.
     pub fn pos(&self) -> JsValue {
         JsValue::Number(self.to_number())
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

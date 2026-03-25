@@ -118,8 +118,4 @@ pub(super) fn unwind_exception(vm: &mut Vm, err: &RawJsError) -> Result<bool> {
     Ok(false)
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

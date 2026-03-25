@@ -1,5 +1,5 @@
 impl Parser {
-    #[doc = " Check if current `await` token starts an `await using` declaration."]
+    /// Check if current `await` token starts an `await using` declaration.
     pub(super) fn is_await_using_declaration(&self) -> bool {
         if self.pos + 2 >= self.tokens.len() {
             return false;
@@ -12,7 +12,7 @@ impl Parser {
 }
 
 impl Parser {
-    #[doc = " Parse a `using x = expr;` or `await using x = expr;` declaration."]
+    /// Parse a `using x = expr;` or `await using x = expr;` declaration.
     pub(super) fn parse_using_declaration(&mut self, is_await: bool) -> Result<Statement> {
         let loc = self.location();
         if is_await {
@@ -169,8 +169,4 @@ impl Parser {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

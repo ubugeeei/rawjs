@@ -1,5 +1,5 @@
 impl Instruction {
-    #[doc = " Return a human-readable mnemonic for debugging / disassembly."]
+    /// Return a human-readable mnemonic for debugging / disassembly.
     pub fn name(&self) -> &'static str {
         match self {
             Instruction::LoadConst(_) => "LOAD_CONST",
@@ -92,5 +92,4 @@ impl Instruction {
     }
 }
 
-#[allow(unused_imports)]
 use super::*;

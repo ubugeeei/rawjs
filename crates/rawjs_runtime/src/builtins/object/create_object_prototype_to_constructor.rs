@@ -146,8 +146,4 @@ pub fn create_object_constructor(heap: &mut Heap) -> GcPtr<JsObject> {
     heap.alloc(obj)
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

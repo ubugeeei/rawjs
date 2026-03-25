@@ -88,8 +88,4 @@ pub(crate) fn exec_yield(vm: &mut Vm) -> Result<Option<JsValue>> {
     Ok(None)
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

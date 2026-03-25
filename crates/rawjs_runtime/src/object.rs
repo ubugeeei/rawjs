@@ -1,66 +1,38 @@
-#[allow(unused_imports)]
-use crate::gc::{GcPtr, Heap};
-#[allow(unused_imports)]
-use crate::value::JsValue;
-#[allow(unused_imports)]
-use rawjs_common::Result;
-#[allow(unused_imports)]
-use std::cell::RefCell;
-#[allow(unused_imports)]
-use std::collections::HashMap;
-#[allow(unused_imports)]
-use std::fmt;
-#[allow(unused_imports)]
-use std::rc::Rc;
-#[allow(unused_imports)]
-use std::sync::{Mutex, OnceLock};
+pub(crate) use crate::gc::{GcPtr, Heap};
+pub(crate) use crate::value::JsValue;
+pub(crate) use rawjs_common::Result;
+pub(crate) use std::cell::RefCell;
+pub(crate) use std::collections::HashMap;
+pub(crate) use std::fmt;
+pub(crate) use std::rc::Rc;
+pub(crate) use std::sync::{Mutex, OnceLock};
 
-#[path = "object/property_key_start_to_from.rs"]
 mod property_key_start_to_from;
-#[allow(unused_imports)]
 pub use self::property_key_start_to_from::PropertyKey;
-#[allow(unused_imports)]
-use self::property_key_start_to_from::*;
-#[path = "object/property_key_from_001_to_promise_reaction.rs"]
+pub(crate) use self::property_key_start_to_from::*;
 mod property_key_from_001_to_promise_reaction;
-#[allow(unused_imports)]
-use self::property_key_from_001_to_promise_reaction::*;
+pub(crate) use self::property_key_from_001_to_promise_reaction::*;
 #[allow(unused_imports)]
 pub use self::property_key_from_001_to_promise_reaction::{
     PromiseReaction, PromiseReactionKind, PromiseStatus, Property,
 };
-#[path = "object/promise_state_to_native_fn.rs"]
 mod promise_state_to_native_fn;
-#[allow(unused_imports)]
-use self::promise_state_to_native_fn::*;
+pub(crate) use self::promise_state_to_native_fn::*;
 #[allow(unused_imports)]
 pub use self::promise_state_to_native_fn::{
     FunctionKind, FunctionObject, GeneratorState, GeneratorStatus, IteratorState, NativeFn,
     ObjectInternal, PromiseState,
 };
-#[path = "object/function_kind_fmt_to_error.rs"]
 mod function_kind_fmt_to_error;
-#[allow(unused_imports)]
-use self::function_kind_fmt_to_error::*;
-#[allow(unused_imports)]
+pub(crate) use self::function_kind_fmt_to_error::*;
 pub use self::function_kind_fmt_to_error::{JsObject, Upvalue};
-#[path = "object/shape_to_tests.rs"]
 mod shape_to_tests;
-#[allow(unused_imports)]
-use self::shape_to_tests::*;
-#[path = "object/iterator_to_as_array_mut.rs"]
+pub(crate) use self::shape_to_tests::*;
 mod iterator_to_as_array_mut;
-#[allow(unused_imports)]
-use self::iterator_to_as_array_mut::*;
-#[path = "object/get_property_to_set_index.rs"]
+pub(crate) use self::iterator_to_as_array_mut::*;
 mod get_property_to_set_index;
-#[allow(unused_imports)]
-use self::get_property_to_set_index::*;
-#[path = "object/has_property_to_get_element.rs"]
+pub(crate) use self::get_property_to_set_index::*;
 mod has_property_to_get_element;
-#[allow(unused_imports)]
-use self::has_property_to_get_element::*;
-#[path = "object/js_object_fmt_to_tests.rs"]
+pub(crate) use self::has_property_to_get_element::*;
 mod js_object_fmt_to_tests;
-#[allow(unused_imports)]
-use self::js_object_fmt_to_tests::*;
+pub(crate) use self::js_object_fmt_to_tests::*;

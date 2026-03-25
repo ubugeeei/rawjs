@@ -100,8 +100,4 @@ pub(super) fn math_min(_heap: &mut Heap, _this: &JsValue, args: &[JsValue]) -> R
     Ok(JsValue::Number(result))
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

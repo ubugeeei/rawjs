@@ -119,8 +119,4 @@ pub(super) fn array_shift(_heap: &mut Heap, this: &JsValue, _args: &[JsValue]) -
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

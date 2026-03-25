@@ -127,8 +127,4 @@ pub(super) fn export_default(vm: &mut Vm) -> Result<()> {
     Ok(())
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

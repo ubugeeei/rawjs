@@ -2,8 +2,8 @@
 ///
 /// Each instruction is a flat enum variant with embedded operands.
 /// Operand meanings:
-///   - u16 index values refer into local/constant/global/upvalue tables
-///   - i32 offsets are signed jump offsets relative to the *next* instruction
+///  - u16 index values refer into local/constant/global/upvalue tables
+///  - i32 offsets are signed jump offsets relative to the *next* instruction
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Instruction {
     /// Push a constant from the constant pool onto the stack.
@@ -180,5 +180,4 @@ pub enum Instruction {
     AsyncDisposeResource(u16),
 }
 
-#[allow(unused_imports)]
 use super::*;

@@ -127,8 +127,4 @@ pub(super) fn array_flat(heap: &mut Heap, this: &JsValue, args: &[JsValue]) -> R
     Ok(JsValue::Object(arr))
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

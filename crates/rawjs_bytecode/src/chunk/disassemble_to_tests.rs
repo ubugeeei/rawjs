@@ -1,5 +1,5 @@
 impl Chunk {
-    #[doc = " Pretty-print the chunk for debugging / disassembly."]
+    /// Pretty-print the chunk for debugging / disassembly.
     pub fn disassemble(&self) -> String {
         let mut out = String::new();
         let gen_tag = if self.is_generator { " generator" } else { "" };
@@ -35,8 +35,8 @@ impl fmt::Display for Chunk {
 }
 
 impl Constant {
-    #[doc = " Value equality check used to de-duplicate constants."]
-    #[doc = " Function constants are never de-duplicated."]
+    /// Value equality check used to de-duplicate constants.
+    /// Function constants are never de-duplicated.
     pub(super) fn eq_value(&self, other: &Constant) -> bool {
         match (self, other) {
             (Constant::Number(a), Constant::Number(b)) => a.to_bits() == b.to_bits(),
@@ -150,5 +150,4 @@ mod tests {
     }
 }
 
-#[allow(unused_imports)]
 use super::*;

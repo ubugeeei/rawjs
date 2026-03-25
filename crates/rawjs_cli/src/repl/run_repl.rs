@@ -32,8 +32,4 @@ pub fn run_repl() {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

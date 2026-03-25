@@ -116,8 +116,4 @@ fn compile_conditional_expression() {
     assert!(matches!(chunk.instructions[1], Instruction::JumpIfFalse(_)));
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

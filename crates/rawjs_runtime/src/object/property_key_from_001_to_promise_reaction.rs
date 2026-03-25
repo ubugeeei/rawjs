@@ -22,7 +22,7 @@ pub struct Property {
 }
 
 impl Property {
-    #[doc = " Create a default data property (writable, enumerable, configurable)."]
+    /// Create a default data property (writable, enumerable, configurable).
     pub fn data(value: JsValue) -> Self {
         Property {
             value,
@@ -36,7 +36,7 @@ impl Property {
 }
 
 impl Property {
-    #[doc = " Create a non-enumerable data property (used for built-in methods)."]
+    /// Create a non-enumerable data property (used for built-in methods).
     pub fn builtin(value: JsValue) -> Self {
         Property {
             value,
@@ -50,7 +50,7 @@ impl Property {
 }
 
 impl Property {
-    #[doc = " Create a read-only property."]
+    /// Create a read-only property.
     pub fn readonly(value: JsValue) -> Self {
         Property {
             value,
@@ -64,7 +64,7 @@ impl Property {
 }
 
 impl Property {
-    #[doc = " Create a read-only, non-enumerable property."]
+    /// Create a read-only, non-enumerable property.
     pub fn readonly_builtin(value: JsValue) -> Self {
         Property {
             value,
@@ -78,7 +78,7 @@ impl Property {
 }
 
 impl Property {
-    #[doc = " Create an accessor property."]
+    /// Create an accessor property.
     pub fn accessor(
         get: Option<JsValue>,
         set: Option<JsValue>,
@@ -125,8 +125,4 @@ pub struct PromiseReaction {
     pub result_promise: Option<GcPtr<JsObject>>,
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

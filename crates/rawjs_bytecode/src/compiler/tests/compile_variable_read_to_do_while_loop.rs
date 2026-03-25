@@ -98,8 +98,4 @@ fn compile_do_while_loop() {
     assert!(matches!(chunk.instructions[3], Instruction::JumpIfTrue(_)));
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

@@ -1,29 +1,15 @@
-#[allow(unused_imports)]
-use crate::object::JsObject;
-#[allow(unused_imports)]
-use crate::value::JsValue;
-#[allow(unused_imports)]
-use std::cell::RefCell;
-#[allow(unused_imports)]
-use std::collections::HashMap;
-#[allow(unused_imports)]
-use std::fmt;
-#[allow(unused_imports)]
-use std::rc::Rc;
+pub(crate) use crate::object::JsObject;
+pub(crate) use crate::value::JsValue;
+pub(crate) use std::cell::RefCell;
+pub(crate) use std::collections::HashMap;
+pub(crate) use std::fmt;
+pub(crate) use std::rc::Rc;
 
-#[path = "gc/micro_task_to_ref_count.rs"]
 mod micro_task_to_ref_count;
-#[allow(unused_imports)]
-use self::micro_task_to_ref_count::*;
-#[allow(unused_imports)]
+pub(crate) use self::micro_task_to_ref_count::*;
 pub use self::micro_task_to_ref_count::{GcPtr, MicroTask};
-#[path = "gc/ptr_eq_to_collect.rs"]
 mod ptr_eq_to_collect;
-#[allow(unused_imports)]
 pub use self::ptr_eq_to_collect::Heap;
-#[allow(unused_imports)]
-use self::ptr_eq_to_collect::*;
-#[path = "gc/force_collect_to_tests.rs"]
+pub(crate) use self::ptr_eq_to_collect::*;
 mod force_collect_to_tests;
-#[allow(unused_imports)]
-use self::force_collect_to_tests::*;
+pub(crate) use self::force_collect_to_tests::*;

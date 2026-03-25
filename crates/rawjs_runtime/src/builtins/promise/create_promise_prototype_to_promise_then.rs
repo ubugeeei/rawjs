@@ -115,8 +115,4 @@ pub(super) fn promise_then(heap: &mut Heap, this: &JsValue, args: &[JsValue]) ->
     Ok(JsValue::Object(result_ptr))
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

@@ -113,5 +113,4 @@ fn test_execute_logical_and_assignment_short_circuits() {
     assert_eq!(vm.get_global("out2"), Some(&JsValue::Number(0.0)));
 }
 
-#[allow(unused_imports)]
 use super::*;

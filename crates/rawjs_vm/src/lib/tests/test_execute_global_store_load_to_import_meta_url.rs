@@ -117,5 +117,4 @@ fn test_execute_import_meta_url() {
     let _ = fs::remove_dir_all(&module_dir);
 }
 
-#[allow(unused_imports)]
 use super::*;

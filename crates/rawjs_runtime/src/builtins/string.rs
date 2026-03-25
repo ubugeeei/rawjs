@@ -1,31 +1,16 @@
-#[allow(unused_imports)]
-use super::helpers;
-#[allow(unused_imports)]
-use super::helpers::{get_this_string, set_native};
-#[allow(unused_imports)]
-use crate::gc::{GcPtr, Heap};
-#[allow(unused_imports)]
-use crate::object::{JsObject, ObjectInternal, Property};
-#[allow(unused_imports)]
-use crate::value::JsValue;
-#[allow(unused_imports)]
-use rawjs_common::{RawJsError, Result};
+pub(crate) use super::helpers;
+pub(crate) use super::helpers::{get_this_string, set_native};
+pub(crate) use crate::gc::{GcPtr, Heap};
+pub(crate) use crate::object::{JsObject, ObjectInternal, Property};
+pub(crate) use crate::value::JsValue;
+pub(crate) use rawjs_common::{RawJsError, Result};
 
-#[path = "string/create_string_prototype_to_string_last_index_of.rs"]
 mod create_string_prototype_to_string_last_index_of;
-#[allow(unused_imports)]
 pub use self::create_string_prototype_to_string_last_index_of::*;
-#[allow(unused_imports)]
-use self::create_string_prototype_to_string_last_index_of::*;
-#[path = "string/string_slice_to_ends_with.rs"]
+pub(crate) use self::create_string_prototype_to_string_last_index_of::*;
 mod string_slice_to_ends_with;
-#[allow(unused_imports)]
 pub use self::string_slice_to_ends_with::*;
-#[allow(unused_imports)]
-use self::string_slice_to_ends_with::*;
-#[path = "string/string_replace_to_tests.rs"]
+pub(crate) use self::string_slice_to_ends_with::*;
 mod string_replace_to_tests;
-#[allow(unused_imports)]
 pub use self::string_replace_to_tests::*;
-#[allow(unused_imports)]
-use self::string_replace_to_tests::*;
+pub(crate) use self::string_replace_to_tests::*;

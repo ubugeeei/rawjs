@@ -113,8 +113,4 @@ pub(super) fn map_for_each(
     Ok(JsValue::Undefined)
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

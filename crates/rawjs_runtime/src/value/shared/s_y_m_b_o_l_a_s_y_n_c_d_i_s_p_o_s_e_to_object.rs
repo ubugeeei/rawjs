@@ -8,7 +8,7 @@ pub struct JsSymbol {
 }
 
 impl JsSymbol {
-    #[doc = " Create a new unique symbol with an optional description."]
+    /// Create a new unique symbol with an optional description.
     pub fn new(description: Option<&str>) -> Self {
         let id = NEXT_SYMBOL_ID.fetch_add(1, Ordering::Relaxed);
         JsSymbol {
@@ -19,7 +19,7 @@ impl JsSymbol {
 }
 
 impl JsSymbol {
-    #[doc = " Create a well-known symbol with a fixed ID."]
+    /// Create a well-known symbol with a fixed ID.
     pub fn well_known(id: u64, description: &str) -> Self {
         JsSymbol {
             id,
@@ -58,42 +58,38 @@ pub enum JsValue {
 }
 
 impl JsValue {
-    #[doc = " Shorthand for creating a heap-allocated JS string value."]
+    /// Shorthand for creating a heap-allocated JS string value.
     pub fn string(s: impl Into<Rc<str>>) -> Self {
         JsValue::String(s.into())
     }
 }
 
 impl JsValue {
-    #[doc = " Shorthand for creating a JS number value."]
+    /// Shorthand for creating a JS number value.
     pub fn number(n: f64) -> Self {
         JsValue::Number(n)
     }
 }
 
 impl JsValue {
-    #[doc = " Shorthand for creating a JS boolean value."]
+    /// Shorthand for creating a JS boolean value.
     pub fn boolean(b: bool) -> Self {
         JsValue::Boolean(b)
     }
 }
 
 impl JsValue {
-    #[doc = " Shorthand for creating a Symbol value."]
+    /// Shorthand for creating a Symbol value.
     pub fn symbol(description: Option<&str>) -> Self {
         JsValue::Symbol(JsSymbol::new(description))
     }
 }
 
 impl JsValue {
-    #[doc = " Shorthand for wrapping a `GcPtr<JsObject>` in a `JsValue`."]
+    /// Shorthand for wrapping a `GcPtr<JsObject>` in a `JsValue`.
     pub fn object(obj: GcPtr<JsObject>) -> Self {
         JsValue::Object(obj)
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

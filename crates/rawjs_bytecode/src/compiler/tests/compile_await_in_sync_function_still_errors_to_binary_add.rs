@@ -135,8 +135,4 @@ fn compile_binary_add() {
     assert_eq!(chunk.instructions[3], Instruction::Pop);
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

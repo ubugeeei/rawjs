@@ -92,8 +92,4 @@ pub struct Compiler {
     pub(crate) persistent_top_level_bindings: bool,
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

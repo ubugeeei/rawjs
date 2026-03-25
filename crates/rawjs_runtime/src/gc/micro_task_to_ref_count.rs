@@ -26,7 +26,7 @@ pub struct GcPtr<T> {
 }
 
 impl<T> GcPtr<T> {
-    #[doc = " Create a new GC pointer wrapping `value`."]
+    /// Create a new GC pointer wrapping `value`.
     pub fn new(value: T) -> Self {
         GcPtr {
             inner: Rc::new(RefCell::new(value)),
@@ -35,28 +35,24 @@ impl<T> GcPtr<T> {
 }
 
 impl<T> GcPtr<T> {
-    #[doc = " Borrow the inner value immutably."]
+    /// Borrow the inner value immutably.
     pub fn borrow(&self) -> std::cell::Ref<'_, T> {
         self.inner.borrow()
     }
 }
 
 impl<T> GcPtr<T> {
-    #[doc = " Borrow the inner value mutably."]
+    /// Borrow the inner value mutably.
     pub fn borrow_mut(&self) -> std::cell::RefMut<'_, T> {
         self.inner.borrow_mut()
     }
 }
 
 impl<T> GcPtr<T> {
-    #[doc = " Return the number of strong references."]
+    /// Return the number of strong references.
     pub fn ref_count(&self) -> usize {
         Rc::strong_count(&self.inner)
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

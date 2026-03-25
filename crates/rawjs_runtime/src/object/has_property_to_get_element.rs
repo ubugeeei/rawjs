@@ -1,5 +1,5 @@
 impl JsObject {
-    #[doc = " Check if the object has a property (own or inherited)."]
+    /// Check if the object has a property (own or inherited).
     pub fn has_property(&self, name: &str) -> bool {
         if self.properties.contains_key(name) {
             return true;
@@ -19,7 +19,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Check if the object has an own property (not inherited)."]
+    /// Check if the object has an own property (not inherited).
     pub fn has_own_property(&self, name: &str) -> bool {
         if self.properties.contains_key(name) {
             return true;
@@ -34,7 +34,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Delete a named property. Returns true if the property existed."]
+    /// Delete a named property. Returns true if the property existed.
     pub fn delete_property(&mut self, name: &str) -> bool {
         if let Some(prop) = self.properties.get(name) {
             if !prop.configurable {
@@ -50,7 +50,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Get all enumerable own property keys (strings)."]
+    /// Get all enumerable own property keys (strings).
     pub fn own_enumerable_keys(&self) -> Vec<String> {
         let mut keys: Vec<String> = Vec::new();
         if let ObjectInternal::Array(ref elements) = self.internal {
@@ -78,7 +78,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Get all own property keys."]
+    /// Get all own property keys.
     pub fn own_keys(&self) -> Vec<String> {
         let mut keys: Vec<String> = Vec::new();
         if let ObjectInternal::Array(ref elements) = self.internal {
@@ -99,7 +99,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Return the number of array elements, or 0 for non-arrays."]
+    /// Return the number of array elements, or 0 for non-arrays.
     pub fn array_length(&self) -> usize {
         match &self.internal {
             ObjectInternal::Array(elements) => elements.len(),
@@ -109,7 +109,7 @@ impl JsObject {
 }
 
 impl JsObject {
-    #[doc = " Get an array element by index, or `Undefined` if out of bounds / not an array."]
+    /// Get an array element by index, or `Undefined` if out of bounds / not an array.
     pub fn get_element(&self, index: usize) -> JsValue {
         match &self.internal {
             ObjectInternal::Array(elements) => {
@@ -120,8 +120,4 @@ impl JsObject {
     }
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

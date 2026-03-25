@@ -129,8 +129,4 @@ pub(super) fn create_strict_arguments_thrower(vm: &mut Vm) -> rawjs_runtime::GcP
     ptr
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;

@@ -162,8 +162,4 @@ pub(super) fn string_ends_with(
     Ok(JsValue::Boolean(s[..end_pos].ends_with(&search)))
 }
 
-#[allow(unused_imports)]
-use super::*;
-
-#[allow(unused_imports)]
 use super::*;
