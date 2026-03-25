@@ -131,3 +131,6 @@ fn test_jit_simple_branch() {
     let result = jit_execute_via_vm(chunk, &[JsValue::Number(9.0), JsValue::Number(2.0)]);
     assert_eq!(result, JsValue::Number(2.0));
 }
+
+#[allow(unused_imports)]
+use super::*;

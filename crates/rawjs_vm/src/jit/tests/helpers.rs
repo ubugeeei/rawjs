@@ -53,3 +53,6 @@ pub(super) fn jit_execute_via_vm(chunk: Chunk, args: &[JsValue]) -> JsValue {
     assert_eq!(result, 0, "JIT execution should succeed (got {result})");
     vm.value_stack.pop().unwrap_or(JsValue::Undefined)
 }
+
+#[allow(unused_imports)]
+use super::*;

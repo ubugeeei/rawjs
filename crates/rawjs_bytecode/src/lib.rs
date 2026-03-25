@@ -10,3 +10,8 @@ pub use opcode::Instruction;
 pub fn compile(program: &rawjs_ast::Program) -> rawjs_common::Result<Chunk> {
     Compiler::compile_program(program)
 }
+
+/// Convenience function to compile a REPL input into a bytecode chunk.
+pub fn compile_repl(program: &rawjs_ast::Program) -> rawjs_common::Result<Chunk> {
+    Compiler::compile_repl_program(program)
+}
